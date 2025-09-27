@@ -1,0 +1,9 @@
+name: labelquick
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10.18
+  - pip=24.2
+  - pip:
+      - -r requirements.txt

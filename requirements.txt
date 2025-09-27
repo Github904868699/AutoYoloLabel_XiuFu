@@ -1,0 +1,56 @@
+--index-url https://pypi.tuna.tsinghua.edu.cn/simple
+--extra-index-url https://download.pytorch.org/whl/cu129
+
+# 使用清华 PyPI 镜像作为主索引，加速国内环境安装；PyTorch CUDA 轮子仍从官方源获取。
+
+# Core PyTorch stack (CUDA 12.9)
+# The PyTorch download index currently exposes CUDA 12.9 wheels starting with the
+# 2.8.0 release train; pin to that family so `pip install` succeeds when using the
+# provided mirror configuration.
+torch==2.8.0+cu129
+# TorchVision CUDA 12.9 wheels start at the 0.23 release which pairs with torch 2.8
+torchvision==0.23.0+cu129
+torchaudio==2.8.0+cu129
+# tensordict 0.10.0 提供与 torch 2.8 兼容的 CUDA 12.9 预编译轮子，并在清华镜像可用
+tensordict==0.10.0
+
+# Qt UI
+PyQt5==5.15.11
+# PyQt5 5.15.11 requires PyQt5-sip>=12.15,<13; pin to the first compatible build.
+PyQt5_sip==12.15.0
+
+# Array & image processing
+numpy==1.26.4
+opencv-python==4.10.0.84
+Pillow==10.4.0
+scikit-image==0.24.0
+
+# Visualization & logging
+matplotlib==3.9.2
+tensorboard==2.17.1
+tqdm==4.66.5
+
+# Data handling
+pandas==2.2.3
+
+# SAM2 and model tooling
+# Hydra 1.2 with OmegaConf 2.2 keeps compatibility with Python 3.10
+hydra-core==1.2.0
+omegaconf==2.2.3
+iopath==0.1.10
+fvcore==0.1.5.post20221221
+huggingface-hub==0.24.6
+submitit==1.5.2
+eva-decord==0.6.1
+onnxruntime-gpu==1.19.2
+pyyaml==6.0.2
+
+# Datasets & annotations
+# PyPI currently lacks Python 3.10 wheels for pycocotools-windows; rely on
+# pycocotools directly and document Windows build notes in the README.
+pycocotools>=2.0.8
+cython==3.0.11
+
+# Packaging helpers
+setuptools>=68.0.0
+wheel>=0.44.0
