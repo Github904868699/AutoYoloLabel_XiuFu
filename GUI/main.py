@@ -1,765 +1,449 @@
-import sys, os
+"""Main application window for the streamlined AutoYoloLabel tool.
+
+This module rewrites the original UI logic around a hand-crafted layout so
+that the code is easier to follow and extend.  The window is split into two
+panels: the left side contains directory/format controls and the image list
+while the right side hosts the interactive canvas together with annotation
+management widgets.
+"""
+from __future__ import annotations
+
+import os
 from pathlib import Path
-from PyQt5 import QtGui, QtWidgets
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen
-from PyQt5.QtCore import Qt, QCoreApplication, QRect, pyqtSignal,QTimer
-from PyQt5.QtCore import Qt, QLineF,QUrl
-from PyQt5.QtGui import QPainter, QPen
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
+from typing import List, Optional, Tuple
+
 import cv2
 import numpy as np
-from util.QtFunc import *
-from util.xmlfile import *
+from PyQt5 import QtCore, QtGui, QtWidgets
 
-from GUI.UI_Main import Ui_MainWindow
-from GUI.message import LabelInputDialog
-
-sys.path.append("smapro")
 from sampro.LabelQuick_TW import Anything_TW
-from sampro.LabelVideo_TW import AnythingVideo_TW
+from util.QtFunc import list_images_in_directory, upWindowsh
+from util.xmlfile import get_labels, load_yolo_labels, write_yolo_labels, xml, xml_message
 
-from PyQt5.QtCore import QThread, pyqtSignal, QTimer
 
-class VideoProcessingThread(QThread):
-    finished = pyqtSignal()  # 完成信号
-    frame_ready = pyqtSignal(object)  # 添加新信号用于传递处理后的帧
+MAX_DISPLAY_WIDTH = 1280
+MAX_DISPLAY_HEIGHT = 820
 
-    def __init__(self, avt, video_path, output_dir,clicked_x, clicked_y, method,text,save_path):
+
+class ImageCanvas(QtWidgets.QLabel):
+    """Clickable QLabel used as a drawing surface for segmentation prompts."""
+
+    clicked = QtCore.pyqtSignal(int, int, int)
+
+    def __init__(self, parent: Optional[QtWidgets.QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setStyleSheet("background-color: #1f1f1f; border: 1px solid #3c3c3c;")
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:  # type: ignore[override]
+        if self.pixmap() is None:
+            return
+        if event.button() == QtCore.Qt.LeftButton:
+            self.clicked.emit(event.x(), event.y(), 1)
+        elif event.button() == QtCore.Qt.RightButton:
+            self.clicked.emit(event.x(), event.y(), 0)
+        super().mousePressEvent(event)
+
+
+class LabelerMainWindow(QtWidgets.QMainWindow):
+    """Main window that wires the segmentation workflow together."""
+
+    def __init__(self) -> None:
         super().__init__()
-        self.AVT = AnythingVideo_TW()
-        self.video_path = video_path
-        self.output_dir = output_dir
-        self.clicked_x = clicked_x
-        self.clicked_y = clicked_y
-        self.method = method
-        self.text = text
-        self.save_path = save_path
-        self.xml_messages = []
-        os.makedirs(self.output_dir, exist_ok=True)
 
-    def run(self):
-        print(self.clicked_x, self.clicked_y, self.method)
-        try:
-            # 创建输出目录和mask子目录
-            os.makedirs(self.output_dir, exist_ok=True)
-            mask_dir = os.path.join(self.output_dir, "mask")
-            os.makedirs(mask_dir, exist_ok=True)
-            
-            # 提取视频帧
-            self.AVT.extract_frames_from_video(self.video_path, self.output_dir,fps=2)
-            self.AVT.set_video(self.output_dir)
-            self.AVT.inference(self.output_dir)
-            self.AVT.Set_Clicked([self.clicked_x, self.clicked_y], self.method)
-            self.AVT.add_new_points_or_box()
-            
-            # 获取处理后的帧并发送信号
-            processed_frame, xml_messages = self.AVT.Draw_Mask_at_frame(save_image_path=mask_dir,save_path=self.save_path,text=self.text)  # 使用新的mask_dir路径
-            self.xml_messages = xml_messages
-            self.frame_ready.emit(processed_frame)  # 发送处理后的帧
-            
-        except Exception as e:
-            print(f"处理出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
-        self.finished.emit()
+        self.setWindowTitle("AutoYoloLabel")
+        self.resize(MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT)
 
+        # Data/state --------------------------------------------------------
+        self.annotation_format = "XML"
+        self.image_files: List[str] = []
+        self.current_index: int = -1
+        self.current_image_path: Optional[str] = None
+        self.save_path: Optional[Path] = None
 
-class MainFunc(QMainWindow):
-    my_signal = pyqtSignal()
+        self.original_image: Optional[np.ndarray] = None
+        self.display_image: Optional[np.ndarray] = None
+        self.display_scale: float = 1.0
+        self.original_size: Tuple[int, int, int] = (0, 0, 3)
 
-    def __init__(self):
-        super(MainFunc, self).__init__()
-        # 连接应用程序的 aboutToQuit 信号到自定义的槽函数
-        QCoreApplication.instance().aboutToQuit.connect(self.clean_up)
-        self.ui = Ui_MainWindow()
-        self.ui.setupUi(self)
+        self.current_labels: List[dict] = []
+        self.display_rects: List[Tuple[int, int, int, int]] = []
+        self.pending_mask: Optional[np.ndarray] = None
+        self.pending_bbox_display: Optional[Tuple[int, int, int, int]] = None
+        self.pending_bbox_original: Optional[Tuple[int, int, int, int]] = None
 
-        self.sld_video_pressed=False
+        self._current_qimage_buffer: Optional[np.ndarray] = None
 
+        self.segmentor = Anything_TW()
 
-        self.image_files = None
-        self.img_path = None
-        self.save_path = None
-        self.clicked_event = False
-        self.paint_event = False
-        self.labels = []
-        self.clicked_save = []
-        self.paint_save = []
-        self.flag = False
-        self.save = True
-        self.cap = None
-        self.video_path = None
+        # UI ----------------------------------------------------------------
+        self._build_ui()
+        self._connect_signals()
 
-        self.AT = Anything_TW()
-        self.AVT = AnythingVideo_TW()
+    # ------------------------------------------------------------------ UI ---
+    def _build_ui(self) -> None:
+        central = QtWidgets.QWidget(self)
+        self.setCentralWidget(central)
 
-        self.timer_camera = QTimer()
+        main_layout = QtWidgets.QHBoxLayout(central)
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(12)
 
-        self.annotation_format = self.ui.comboBox.currentText().strip().upper() or "XML"
-        self.ui.comboBox.currentTextChanged.connect(self.on_annotation_format_changed)
-        self.ui.currentImageLabel.setText("Path")
+        splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self)
+        main_layout.addWidget(splitter)
 
-        self.ui.actionOpen_Dir.triggered.connect(self.get_dir)
-        self.ui.actionNext_Image.triggered.connect(self.next_img)
-        self.ui.actionPrev_Image.triggered.connect(self.prev_img)
-        self.ui.actionChange_Save_Dir.triggered.connect(self.set_save_path)
-        self.ui.actionCreate_RectBox.triggered.connect(self.mousePaint)
-        self.ui.actionOpen_Video.triggered.connect(self.get_video)
-        self.ui.actionVideo_marking.triggered.connect(self.video_marking)
+        # Left column -----------------------------------------------------
+        left_panel = QtWidgets.QWidget()
+        left_layout = QtWidgets.QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
 
+        header_label = QtWidgets.QLabel("数据集管理")
+        header_label.setStyleSheet("font-size: 16px; font-weight: 600;")
+        left_layout.addWidget(header_label)
 
-        self.ui.pushButton.clicked.connect(self.Btn_Start)
-        self.ui.pushButton_2.clicked.connect(self.Btn_Stop)
-        self.ui.pushButton_3.clicked.connect(self.Btn_Save)
-        self.ui.pushButton_4.clicked.connect(self.Btn_Replay)
-        self.ui.pushButton_5.clicked.connect(self.Btn_Auto)
-        self.ui.pushButton_start_marking.clicked.connect(self.Btn_Start_Marking)
+        button_row = QtWidgets.QHBoxLayout()
+        self.open_button = QtWidgets.QPushButton("打开图片夹")
+        self.save_dir_button = QtWidgets.QPushButton("标注保存位置")
+        button_row.addWidget(self.open_button)
+        button_row.addWidget(self.save_dir_button)
+        left_layout.addLayout(button_row)
 
-        self.ui.horizontalSlider.sliderReleased.connect(self.releaseSlider)
-        self.ui.horizontalSlider.sliderPressed.connect(self.pressSlider)
-        self.ui.horizontalSlider.sliderMoved.connect(self.moveSlider)
+        format_row = QtWidgets.QHBoxLayout()
+        format_label = QtWidgets.QLabel("标注格式：")
+        self.format_combo = QtWidgets.QComboBox()
+        self.format_combo.addItems(["XML", "YOLO"])
+        format_row.addWidget(format_label)
+        format_row.addWidget(self.format_combo)
+        format_row.addStretch(1)
+        left_layout.addLayout(format_row)
 
-        # 获取视频总帧数和当前帧位置
-        self.total_frames = 0
-        self.current_frame = 0
+        self.image_list = QtWidgets.QListWidget()
+        self.image_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.image_list.setAlternatingRowColors(True)
+        left_layout.addWidget(self.image_list, 1)
 
-    def Change_Enable(self,method="",state=False):
-        if method=="ShowVideo":
-            self.ui.pushButton.setEnabled(state)
-            self.ui.pushButton_2.setEnabled(state)
-            self.ui.pushButton_3.setEnabled(state)
-            self.ui.pushButton_4.setEnabled(state)  # 初始时禁用重播按钮
-            self.ui.pushButton_5.setEnabled(state)
-            self.ui.horizontalSlider.setEnabled(state)
-        if method=="MakeTag":
-            self.ui.actionPrev_Image.setEnabled(state)
-            self.ui.actionNext_Image.setEnabled(state)
-            self.ui.actionCreate_RectBox.setEnabled(state)
-            
-    def get_dir(self):
-        self.ui.listWidget.clear()
-        if self.cap:
-            self.timer_camera.stop()
-            self.ui.listWidget.clear()  # 清空listWidget
-        self.directory = QtWidgets.QFileDialog.getExistingDirectory()
-        if self.directory:
-            self.image_files = list_images_in_directory(self.directory)
-            self.current_index = 0
-            self.show_path_image()
-            self.Change_Enable(method="MakeTag",state=True)
-            self.Change_Enable(method="ShowVideo",state=False)
-            # 禁用开始检测打标按钮
-            self.ui.pushButton_start_marking.setEnabled(False)
-            # 鼠标点击触发
-            self.ui.label_4.mousePressEvent = self.mouse_press_event
-        else:
-            self.ui.currentImageLabel.setText("")
+        navigation_row = QtWidgets.QHBoxLayout()
+        self.prev_button = QtWidgets.QPushButton("上一张")
+        self.next_button = QtWidgets.QPushButton("下一张")
+        navigation_row.addWidget(self.prev_button)
+        navigation_row.addWidget(self.next_button)
+        left_layout.addLayout(navigation_row)
 
-    def show_path_image(self):
-        if self.image_files:
-            self.image_path = self.image_files[self.current_index]
-            # print(self.image_path)
-            self.img_path = self.image_path
-            self.image_name = os.path.basename(self.image_path).split('.')[0]
-            # print(self.image_name)
+        splitter.addWidget(left_panel)
 
-            self.img_path, self.img_width, self.img_height = Change_image_Size(self.img_path)
-            self.image = cv2.imread(self.img_path)
-            self.AT.Set_Image(self.image)
-            self.show_qt(self.img_path)
-            self.Exists_Labels_And_Boxs()
-            self.ui.currentImageLabel.setText(f"{os.path.basename(self.image_path)}")
-        else:
-            self.ui.currentImageLabel.setText("")
+        # Right column ----------------------------------------------------
+        right_panel = QtWidgets.QWidget()
+        right_layout = QtWidgets.QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
 
-    # 展示已保存所有标签
-    def Exists_Labels_And_Boxs(self):
-        self.list_labels = []
-        self.labels = []
-        self.clicked_save = []
-        self.paint_save = []
-        self.ui.listWidget.clear()
+        info_row = QtWidgets.QHBoxLayout()
+        self.current_image_label = QtWidgets.QLabel("未加载图片")
+        self.current_image_label.setStyleSheet("font-weight: 600;")
+        info_row.addWidget(self.current_image_label)
+        info_row.addStretch(1)
+        self.status_label = QtWidgets.QLabel("准备就绪")
+        self.status_label.setStyleSheet("color: #666666;")
+        info_row.addWidget(self.status_label)
+        right_layout.addLayout(info_row)
 
-        if not self.save_path or not self.image_name:
-            return
+        self.canvas = ImageCanvas()
+        self.canvas.setMinimumSize(640, 480)
+        scroll_area = QtWidgets.QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll_area.setAlignment(QtCore.Qt.AlignCenter)
+        scroll_area.setWidget(self.canvas)
+        right_layout.addWidget(scroll_area, 1)
 
-        base_path = Path(self.save_path) / self.image_name
-        preferred_formats = [self.annotation_format]
-        fallback = "YOLO" if self.annotation_format == "XML" else "XML"
-        preferred_formats.append(fallback)
-
-        for fmt in preferred_formats:
-            if fmt == "YOLO":
-                txt_path = base_path.with_suffix(".txt")
-                labels, boxes, names = load_yolo_labels(txt_path, self.img_width or 0, self.img_height or 0)
-                if not labels:
-                    continue
-                self.labels = labels
-                self.paint_save = boxes
-                for name in names:
-                    self.ui.listWidget.addItem(name)
-                self.Show_Exists()
-                return
-            else:
-                xml_path = base_path.with_suffix(".xml")
-                if not xml_path.exists():
-                    continue
-                self.labels = get_labels(str(xml_path))
-                self.list_labels, list_box = list_label(str(xml_path))
-                self.paint_save = list_box
-                for label in self.list_labels:
-                    self.ui.listWidget.addItem(label)
-                self.Show_Exists()
-                return
-
-    def show_qt(self, img_path):
-        if img_path != None:
-            Qt_Gui = QtGui.QPixmap(img_path)
-            self.ui.label_3.setFixedSize(self.img_width, self.img_height)
-            self.ui.label_3.setPixmap(Qt_Gui)
-
-    def next_img(self):
-        if self.img_path and not self.clicked_event and not self.paint_event:
-            if self.image_files and self.current_index < len(self.image_files) - 1:
-                self.current_index += 1
-                print(self.current_index)
-                self.Other_Img()
-            else:
-                upWindowsh("这是最后一张")
-
-    def prev_img(self):
-        if self.img_path and not self.clicked_event and not self.paint_event:
-            if self.image_files and self.current_index > 0:
-                self.current_index -= 1
-                self.Other_Img()
-                
-            else:
-                upWindowsh("这是第一张")
-                
-    def Other_Img(self):
-        self.labels = []
-        self.paint_save = []
-        self.clicked_save = []
-        self.ui.listWidget.clear()
-        self.show_path_image()
-
-    def set_save_path(self):
-        directory = QtWidgets.QFileDialog.getExistingDirectory()
-        if directory:
-            self.save_path = directory
-            if self.img_path:
-                self.Exists_Labels_And_Boxs()
-
-# ########################################################################################################################
-    # seg
-    def mouse_press_event(self, event):
-        try:
-            if self.img_path:
-                self.clicked_event = True
-                x = event.x()
-                y = event.y()
-
-                if event.button() == Qt.LeftButton:
-                    self.clicked_x, self.clicked_y, self.method = x, y, 1
-                if event.button() == Qt.RightButton:
-                    self.clicked_x, self.clicked_y, self.method = x, y, 0
-
-                image = self.image.copy()
-                self.AT.Set_Clicked([x, y], self.method)
-                self.AT.Create_Mask()
-                image = self.AT.Draw_Mask(self.AT.mask, image)
-
-                h,w,channels=image.shape
-                bytes_per_line = channels * w
-                q_image = QImage(image.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-
-                Qt_Gui = QtGui.QPixmap(q_image)
-                self.ui.label_3.setFixedSize(self.img_width, self.img_height)
-                self.ui.label_3.setPixmap(Qt_Gui)
-
-                self.save = False
-        except Exception as e:
-            print(f"Error in mouse_press_event: {str(e)}")
-
-# ########################################################################################################################
-# 重写QWidget类的keyPressEvent方法
-    def keyPressEvent(self, event):
-        if self.img_path:
-            if self.clicked_event and not self.paint_event:
-                image = self.AT.Key_Event(event.key())
-
-            if self.video_path:
-                if self.clicked_event or self.paint_event:
-                    if (event.key() == 83):
-                        self.save = True
-                        self.dialog = LabelInputDialog(self)
-                        self.dialog.show()
-                        self.dialog.confirmed.connect(self.video_on_dialog_confirmed)
-                        
-                        # 禁用label4的鼠标事件
-                        self.ui.label_4.mousePressEvent = None
-
-                    if (event.key() == 81):
-                        self.clicked_event = False
-                        self.paint_event = False
-                        self.save = True
-                        self.Show_Exists()
-                        self.ui.label_4.mousePressEvent = self.mouse_press_event
-                        self.ui.label_4.setCursor(Qt.ArrowCursor)
-            else:
-                if self.clicked_event or self.paint_event:
-                    if (event.key() == 83):
-                        self.save = True
-                        self.dialog = LabelInputDialog(self)
-                        self.dialog.show()
-                        self.dialog.confirmed.connect(self.on_dialog_confirmed)
-
-                    if (event.key() == 81):
-                        self.clicked_event = False
-                        self.paint_event = False
-                        self.save = True
-                        self.Show_Exists()
-                        self.ui.label_4.mousePressEvent = self.mouse_press_event
-                        self.ui.label_4.setCursor(Qt.ArrowCursor)
-
-                
-
-            if (event.key() == 16777219):
-                    self.clicked_event = False
-                    self.paint_event = False
-                    self.save = True
-                    self.ui.listWidget.clear()
-                    self.list_labels = []
-                    self.clicked_save = []
-                    self.paint_save = []
-                    self.show_qt(self.img_path)
-                    self.ui.label_4.mousePressEvent = self.mouse_press_event
-                    self.ui.label_4.setCursor(Qt.ArrowCursor)
-                    base_path = Path(self.save_path) / self.image_name if self.save_path else None
-                    if base_path:
-                        xml_path = base_path.with_suffix(".xml")
-                        txt_path = base_path.with_suffix(".txt")
-                        if xml_path.exists():
-                            xml_path.unlink()
-                        if txt_path.exists():
-                            txt_path.unlink()
-                        self.labels = []
-                    else:
-                        super(QMainWindow, self).keyPressEvent(event)
-
-            
-
-
-    
-    def on_dialog_confirmed(self, text):
-        if not self.save_path:
-            upWindowsh("请选择保存路径")
-
-        elif text and self.clicked_event:
-            self.ui.listWidget.addItem(text)
-            result, file_path, size = xml_message(self.save_path, self.image_name, self.img_width, self.img_height,
-                                                  text, self.AT.x, self.AT.y, self.AT.w, self.AT.h)
-            self.labels.append(result)
-            self.clicked_save.append([self.AT.x, self.AT.y, (self.AT.w + self.AT.x), (self.AT.h + self.AT.y)])
-            self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
-
-        elif text and self.paint_event:
-            self.paint_event = False
-            self.clicked_event = True
-            self.ui.listWidget.addItem(text)
-            result, file_path, size = xml_message(self.save_path, self.image_name, self.img_width, self.img_height,
-                                                  text, self.x0, self.y0, abs(self.x1 - self.x0),
-                                                  abs(self.y1 - self.y0))
-            self.labels.append(result)
-            self.paint_save.append([self.x0, self.y0, self.x1, self.y1])
-            self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
-
-            self.ui.label_4.mousePressEvent = self.mouse_press_event
-            self.ui.label_4.setCursor(Qt.ArrowCursor)
-            
-        self.clicked_event = False
-        self.paint_event = False
-
-        self.Show_Exists()
-
-    def video_on_dialog_confirmed(self, text):
-        self.text = text
-        print(self.text)
-        if not self.save_path:
-            upWindowsh("请选择保存路径")
-        elif text and self.clicked_event:
-            self.ui.listWidget.addItem(text)
-            result, file_path, size = xml_message(self.save_path, self.image_name, self.img_width, self.img_height,
-                                                    text, self.AT.x, self.AT.y, self.AT.w, self.AT.h)
-            self.labels.append(result)
-            self.clicked_save.append([self.AT.x, self.AT.y, (self.AT.w + self.AT.x), (self.AT.h + self.AT.y)])
-            self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
-            # 启用"开始检测打标"按钮
-            self.ui.pushButton_start_marking.setEnabled(True)
-        self.clicked_event = False
-        self.paint_event = False
-
-        self.Show_Exists()
-        
-
-    # 显示已存在框
-    def Show_Exists(self):
-        image = cv2.imread(self.img_path)
-        if self.clicked_save == [] and self.paint_save == []:
-            self.show_qt(self.img_path)
-        else:
-            if self.clicked_save != []:
-                for i in self.clicked_save:
-                    image = cv2.rectangle(image, (i[0], i[1]), (i[2], i[3]), (0, 255, 0), 2)
-            if self.paint_save != []:
-                for i in self.paint_save:
-                    image = cv2.rectangle(image, (i[0], i[1]), (i[2], i[3]), (0, 0, 255), 2)
-
-            h,w,channels=image.shape
-            bytes_per_line = channels * w
-            q_image = QImage(image.data, w, h, bytes_per_line, QImage.Format_RGB888).rgbSwapped()
-
-            Qt_Gui = QtGui.QPixmap(q_image)
-            self.ui.label_3.setFixedSize(self.img_width, self.img_height)
-            self.ui.label_3.setPixmap(Qt_Gui)
-
-# ##################################################################################################
-    # 手动打标
-    def mousePaint(self):
-        if self.img_path != None:
-            self.paint_event = True
-            self.clicked_event = False
-            if self.save:
-                self.ui.label_4.mousePressEvent = self.mousePressEvent
-                self.ui.label_4.mouseMoveEvent = self.mouseMoveEvent
-                self.ui.label_4.mouseReleaseEvent = self.mouseReleaseEvent
-                self.ui.label_4.paintEvent = self.paintEvent
-                self.ui.label_4.setCursor(Qt.CrossCursor)
-                self.save = False
-            else:
-                upWindowsh("请先输入标签")
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self.flag = True
-            self.show_qt(self.img_path)
-            self.x0, self.y0 = event.pos().x(), event.pos().y()
-            self.x1, self.y1 = self.x0, self.y0
-            self.ui.label_4.update()
-
-    def mouseReleaseEvent(self, event):
-        if self.flag:
-            self.saveAndUpdate()
-        self.flag = False
-        self.save = False
-
-    def mouseMoveEvent(self, event):
-        if self.flag:
-            self.x1, self.y1 = event.pos().x(), event.pos().y()
-            self.ui.label_4.update()
-
-    def paintEvent(self, event):
-        super(MainFunc, self).paintEvent(event)
-        if self.flag and self.x0 != 0 and self.y0 != 0 and self.x1 != 0 and self.y1 != 0:
-            painter = QPainter(self.ui.label_4)
-            painter.setPen(QPen(Qt.red, 4, Qt.SolidLine))
-            painter.drawRect(QRect(self.x0, self.y0, abs(self.x1 - self.x0), abs(self.y1 - self.y0)))
-
-    def saveAndUpdate(self):
-        try:
-
-            # 获取当前label上的QPixmap对象
-            if self.ui.label_3.pixmap():
-                pixmap = self.ui.label_3.pixmap()
-                image = QImage(pixmap.size(), QImage.Format_ARGB32)
-                painter = QPainter(image)
-
-                # 绘制原始图像
-                painter.drawPixmap(0, 0, pixmap)
-
-                # 绘制矩形框
-                if self.x0 != 0 and self.y0 != 0 and self.x1 != 0 and self.y1 != 0:
-                    painter.setPen(QPen(Qt.red, 4, Qt.SolidLine))
-                    painter.drawRect(QRect(self.x0, self.y0, abs(self.x1 - self.x0), abs(self.y1 - self.y0)))
-
-                painter.end()
-        except Exception as e:
-            print(f"Error saving and updating image: {e}")
-
-# ##################################################################################################
-    # 获取视频
-    def get_video(self):
-        self.ui.listWidget.clear()  # 清空listWidget
-        self.image_files = None
-        self.img_path = None
-        self.num = 0
-        video_save_path = QtWidgets.QFileDialog.getExistingDirectory(self, "选择图片保存文件夹")
-        if video_save_path:
-            self.video_save_path = video_save_path
-        
-        video_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, 
-            "选择视频", 
-            "", 
-            "Video Files (*.mp4 *.mpg)"
+        self.hint_label = QtWidgets.QLabel(
+            "左键添加前景点，右键添加背景点。满意后输入标签名称点击保存。"
         )
-        
-        if video_path and video_save_path:
-            self.video_path = video_path  # 保存视频路径以供重播使用
-            self.cap = cv2.VideoCapture(video_path)
-            # 获取视频总帧数
-            self.total_frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            # 设置滑块范围
-            self.ui.horizontalSlider.setRange(0, self.total_frames)
-            self.timer_camera.start(33)
-            self.timer_camera.timeout.connect(self.OpenFrame)
-            # 初始禁用重播按钮
-            self.ui.pushButton_4.setEnabled(False)
-        
-            self.Change_Enable(method="ShowVideo", state=True)
-            self.Change_Enable(method="MakeTag", state=False)
-            # 禁用开始检测打标按钮
-            self.ui.pushButton_start_marking.setEnabled(False)
-        else:
-            upWindowsh("请先选择视频和保存路径")
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setStyleSheet("color: #666666;")
+        right_layout.addWidget(self.hint_label)
 
+        form_row = QtWidgets.QHBoxLayout()
+        self.label_edit = QtWidgets.QLineEdit()
+        self.label_edit.setPlaceholderText("标签名称…")
+        self.save_button = QtWidgets.QPushButton("保存标注")
+        self.clear_button = QtWidgets.QPushButton("撤销本次")
+        form_row.addWidget(self.label_edit, 1)
+        form_row.addWidget(self.save_button)
+        form_row.addWidget(self.clear_button)
+        right_layout.addLayout(form_row)
 
-    def OpenFrame(self):
-        if not self.sld_video_pressed:  # 只在未拖动时更新
-            ret, image = self.cap.read()
-            if ret:
-                # 更新当前帧位置
-                self.current_frame = int(self.cap.get(cv2.CAP_PROP_POS_FRAMES))
-                # 更新滑块位置
-                self.ui.horizontalSlider.setValue(self.current_frame)
-                
-                # 调整视频帧大小
-                height, width = image.shape[:2]
-                ratio = 1300 / width
-                new_width = 1300
-                new_height = int(height * ratio)
-                
-                if new_height > 850:
-                    ratio = 850 / new_height
-                    new_height = 850
-                    new_width = int(new_width * ratio)
-                
-                # 调整图像大小
-                image = cv2.resize(image, (new_width, new_height))
-                
-                if len(image.shape) == 3:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    vedio_img = QImage(image.data, new_width, new_height, image.strides[0], QImage.Format_RGB888)
-                elif len(image.shape) == 1:
-                    vedio_img = QImage(image.data, new_width, new_height, QImage.Format_Indexed8)
-                else:
-                    vedio_img = QImage(image.data, new_width, new_height, image.strides[0], QImage.Format_RGB888)
-                self.vedio_img = vedio_img
-                
-                # 调整label大小以适应新的图像尺寸
-                self.ui.label_3.setFixedSize(new_width, new_height)
-                self.ui.label_3.setPixmap(QPixmap(self.vedio_img))
-                self.ui.label_3.setScaledContents(True)
-            else:
-                self.cap.release()
-                self.timer_camera.stop()
-                # 视频结束时启用重播按钮
-                self.ui.pushButton_4.setEnabled(True)
+        annotation_header = QtWidgets.QHBoxLayout()
+        annotation_label = QtWidgets.QLabel("已有标注")
+        annotation_label.setStyleSheet("font-weight: 600;")
+        annotation_header.addWidget(annotation_label)
+        annotation_header.addStretch(1)
+        self.delete_button = QtWidgets.QPushButton("删除选中")
+        self.delete_button.setEnabled(False)
+        annotation_header.addWidget(self.delete_button)
+        right_layout.addLayout(annotation_header)
 
+        self.annotation_list = QtWidgets.QListWidget()
+        self.annotation_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
+        self.annotation_list.setAlternatingRowColors(True)
+        right_layout.addWidget(self.annotation_list, 1)
 
-    def Btn_Start(self):
-        try:
-            # 尝试断开之前的连接
-            self.timer_camera.timeout.disconnect(self.OpenFrame)
-        except TypeError:
-            # 如果没有连接，直接忽略错误
-            pass
-        # 重新连接并启动定时器
-        self.timer_camera.timeout.connect(self.OpenFrame)
-        self.timer_camera.start(33)
+        splitter.addWidget(right_panel)
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
 
-    def Btn_Stop(self):
-        self.timer_camera.stop()
-        try:
-            # 尝试断开定时器连接
-            self.timer_camera.timeout.disconnect(self.OpenFrame)
-        except TypeError:
-            pass
+    def _connect_signals(self) -> None:
+        self.open_button.clicked.connect(self._open_directory)
+        self.save_dir_button.clicked.connect(self._select_save_directory)
+        self.image_list.itemSelectionChanged.connect(self._on_image_selected)
+        self.prev_button.clicked.connect(self._go_previous)
+        self.next_button.clicked.connect(self._go_next)
+        self.canvas.clicked.connect(self._on_canvas_clicked)
+        self.save_button.clicked.connect(self._save_annotation)
+        self.clear_button.clicked.connect(self._clear_pending_annotation)
+        self.delete_button.clicked.connect(self._delete_selected_annotation)
+        self.annotation_list.itemSelectionChanged.connect(self._on_annotation_selected)
+        self.format_combo.currentTextChanged.connect(self._on_format_changed)
 
-    def Btn_Save(self):
-        self.num += 1
-        save_path = f'{self.video_save_path}/image{str(self.num)}.jpg'
-        self.vedio_img.save(save_path)
-        # 将保存信息添加到listWidget
-        save_info = f'image{str(self.num)}.jpg保存成功！'
-        self.ui.listWidget.addItem(save_info)
-        print(f'{save_path}保存成功！')
+    # -------------------------------------------------------------- helpers ---
+    def _set_status(self, message: str) -> None:
+        self.status_label.setText(message)
 
-    
-    def moveSlider(self, position):
-        """处理滑块移动"""
-        if self.cap and self.total_frames > 0:
-            # 设置视频帧位置
-            self.cap.set(cv2.CAP_PROP_POS_FRAMES, position)
-            # 读取并显示新位置的帧
-            ret, image = self.cap.read()
-            if ret:
-                # 调整视频帧大小
-                height, width = image.shape[:2]
-                ratio = 1300 / width
-                new_width = 1300
-                new_height = int(height * ratio)
-                
-                if new_height > 850:
-                    ratio = 850 / new_height
-                    new_height = 850
-                    new_width = int(new_width * ratio)
-                
-                # 调整图像大小
-                image = cv2.resize(image, (new_width, new_height))
-                
-                if len(image.shape) == 3:
-                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-                    vedio_img = QImage(image.data, new_width, new_height, image.strides[0], QImage.Format_RGB888)
-                elif len(image.shape) == 1:
-                    vedio_img = QImage(image.data, new_width, new_height, QImage.Format_Indexed8)
-                else:
-                    vedio_img = QImage(image.data, new_width, new_height, image.strides[0], QImage.Format_RGB888)
-                self.vedio_img = vedio_img
-                
-                # 调整label大小以适应新的图像尺寸
-                self.ui.label_3.setFixedSize(new_width, new_height)
-                self.ui.label_3.setPixmap(QPixmap(self.vedio_img))
-                self.ui.label_3.setScaledContents(True)
-
-    def pressSlider(self):
-        self.sld_video_pressed = True
-        self.timer_camera.stop()  # 暂停视频播放
-
-    def releaseSlider(self):
-        self.sld_video_pressed = False
-        try:
-            # 尝试断开之前的连接
-            self.timer_camera.timeout.disconnect(self.OpenFrame)
-        except TypeError:
-            pass
-        # 重新连接并启动定时器
-        self.timer_camera.timeout.connect(self.OpenFrame)
-        self.timer_camera.start(33)
-
-    def clean_up(self):
-        file_path = 'GUI/history.txt'
-        if os.path.exists(file_path):
-            os.remove(file_path)
-
-    def Btn_Replay(self):
-        """重新播放视频"""
-        if hasattr(self, 'video_path'):
-            # 重新打开视频文件
-            self.cap = cv2.VideoCapture(self.video_path)
-            # 重置滑块位置
-            self.ui.horizontalSlider.setValue(0)
-            # 开始播放
-            self.timer_camera.start(33)                 
-            # 禁用重播按钮
-            self.ui.pushButton_4.setEnabled(False)
-
-    def Btn_Auto(self):
-        if self.video_path and self.video_save_path:
-            output_dir,saved_count = self.AVT.extract_frames_from_video(self.video_path, self.video_save_path, fps=2)
-            content = f"已从视频中提取 {saved_count} 帧\n保存至 {output_dir}"
-            print(content)
-            self.ui.listWidget.addItem(content)
-        else:
-            upWindowsh("请先选择视频和保存路径")
-
-    def video_marking(self):
-        self.directory = None
-        video_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "选择视频", "", "Video Files (*.mp4 *.mpg)")
-        self.video_path = video_path
-
-        output_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "选择图片保存文件夹")
-        self.output_dir = output_dir
-        self.ui.listWidget.clear()
-        if self.video_path and self.output_dir:
-            self.Change_Enable(method="MakeTag",state=False)
-            self.Change_Enable(method="ShowVideo",state=False)
-            if self.cap:
-                self.cap.release()
-                self.timer_camera.stop()
-
-            # 读取视频第一帧
-            cap = cv2.VideoCapture(video_path)
-            ret, frame = cap.read()
-            if ret:
-                cv2.imwrite(f"{self.output_dir}/0.jpg", frame)
-            cap.release()
-            if self.output_dir:
-                self.image_files = list_images_in_directory(self.output_dir)
-                if self.image_files:
-                    self.image_path = self.image_files[0]
-                    # print(self.image_path)
-                    self.img_path = self.image_path
-                    self.image_name = os.path.basename(self.image_path).split('.')[0]
-                    # print(self.image_name)
-
-                    self.img_path, self.img_width, self.img_height = Change_image_Size(self.img_path)
-                    print(self.img_path, self.img_width, self.img_height)
-                    self.image = cv2.imread(self.img_path)
-
-                    self.AT.Set_Image(self.image)
-                    # 转换为QPixmap并显示
-                    Qt_Gui = QtGui.QPixmap(self.img_path)
-                    # 设置label大小为图片原始大小
-                    self.ui.label_3.setFixedSize(self.img_width, self.img_height)
-                    self.ui.label_3.setPixmap(Qt_Gui)
-                    self.ui.currentImageLabel.setText(f"当前图片：{os.path.basename(self.image_path)}")
-
-            # 鼠标点击触发
-            self.ui.label_4.mousePressEvent = self.mouse_press_event
-        else:
-            upWindowsh("请先选择视频和保存路径")
-
-
-    def on_video_processing_complete(self):
-        self.worker_thread.deleteLater()
-        self.xml_messages = self.worker_thread.xml_messages
-        # print(self.xml_messages)
-        
-        # 遍历输出目录中的图片
-        for img_file in os.listdir(self.output_dir):
-            if img_file.endswith(('.jpg', '.jpeg', '.png')):  # 检查图片文件扩展名
-                # 获取不带扩展名的文件名
-                img_name = os.path.splitext(img_file)[0]
-                img_file  = os.path.join(self.output_dir,img_file)
-
-                # 在xml_messages中查找对应的消息
-                for msg in self.xml_messages:
-                    self.labels = []
-                    if len(msg) > 1:  # 确保msg有足够的元素
-                        xml_path = msg[1]  # 获取索引值为1的路径
-                        xml_filename = os.path.splitext(os.path.basename(xml_path))[0]
-
-                        # 如果文件名匹配，则复制XML文件到save_path
-                        if xml_filename == img_name and self.save_path:
-                            result = msg[0]
-                            file_path = msg[1]
-                            size = msg[2]
-                            self.labels.append(result)
-                            self.save_annotation_files(img_file, img_name, size, self.labels)
-        self.ui.listWidget.addItem("检测打标完成！")
-        print("检测打标完成！")
-
-    def on_annotation_format_changed(self, text):
-        self.annotation_format = text.strip().upper() or "XML"
-        self.Exists_Labels_And_Boxs()
-
-    def save_annotation_files(self, image_path, image_name, size, labels):
-        if not self.save_path:
+    def _open_directory(self) -> None:
+        directory = QtWidgets.QFileDialog.getExistingDirectory(self, "选择图片文件夹")
+        if not directory:
             return
 
-        base_path = Path(self.save_path) / str(image_name)
+        self.image_files = sorted(list_images_in_directory(directory))
+        if not self.image_files:
+            upWindowsh("该文件夹下未找到图片")
+            return
 
+        self.current_index = 0
+        self.image_list.clear()
+        for path in self.image_files:
+            self.image_list.addItem(os.path.relpath(path, directory))
+        self.image_list.setCurrentRow(0)
+
+        if self.save_path is None:
+            self.save_path = Path(directory)
+        self._set_status(f"共 {len(self.image_files)} 张图片")
+
+    def _select_save_directory(self) -> None:
+        directory = QtWidgets.QFileDialog.getExistingDirectory(self, "选择保存路径")
+        if directory:
+            self.save_path = Path(directory)
+            self._set_status(f"标注保存至：{directory}")
+
+    def _go_previous(self) -> None:
+        if not self.image_files:
+            return
+        if self.current_index <= 0:
+            upWindowsh("已经是第一张")
+            return
+        self.current_index -= 1
+        self.image_list.setCurrentRow(self.current_index)
+
+    def _go_next(self) -> None:
+        if not self.image_files:
+            return
+        if self.current_index >= len(self.image_files) - 1:
+            upWindowsh("已经是最后一张")
+            return
+        self.current_index += 1
+        self.image_list.setCurrentRow(self.current_index)
+
+    def _on_format_changed(self, text: str) -> None:
+        self.annotation_format = text.strip().upper() or "XML"
+        self._load_existing_annotations()
+
+    # ------------------------------------------------------------- loading ---
+    def _on_image_selected(self) -> None:
+        row = self.image_list.currentRow()
+        if row < 0 or row >= len(self.image_files):
+            return
+        self.current_index = row
+        path = self.image_files[row]
+        self._load_image(path)
+
+    def _load_image(self, path: str) -> None:
+        image = cv2.imread(path)
+        if image is None:
+            upWindowsh("无法读取图片：" + path)
+            return
+
+        self.current_image_path = path
+        self.original_image = image
+        h, w = image.shape[:2]
+        channels = image.shape[2] if image.ndim == 3 else 1
+        self.original_size = (w, h, channels)
+
+        scale = min(MAX_DISPLAY_WIDTH / w, MAX_DISPLAY_HEIGHT / h, 1.0)
+        if scale != 1.0:
+            display = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
+        else:
+            display = image.copy()
+        self.display_scale = scale
+        self.display_image = display
+        self.segmentor.Set_Image(display.copy())
+
+        self.current_labels = []
+        self.display_rects = []
+        self.pending_mask = None
+        self.pending_bbox_display = None
+        self.pending_bbox_original = None
+        self.annotation_list.clear()
+        self.label_edit.clear()
+        self.delete_button.setEnabled(False)
+
+        self.current_image_label.setText(os.path.basename(path))
+        self._show_on_canvas(display)
+        self._load_existing_annotations()
+        self._set_status("等待点击生成掩膜…")
+
+    def _show_on_canvas(self, image: np.ndarray) -> None:
+        if image is None:
+            self.canvas.clear()
+            return
+        rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        h, w = rgb.shape[:2]
+        self._current_qimage_buffer = rgb.copy()
+        q_image = QtGui.QImage(
+            self._current_qimage_buffer.data,
+            w,
+            h,
+            self._current_qimage_buffer.strides[0],
+            QtGui.QImage.Format_RGB888,
+        )
+        pixmap = QtGui.QPixmap.fromImage(q_image)
+        self.canvas.setFixedSize(w, h)
+        self.canvas.setPixmap(pixmap)
+
+    def _render_with_overlays(self) -> None:
+        if self.display_image is None:
+            return
+        canvas = self.display_image.copy()
+        for x1, y1, x2, y2 in self.display_rects:
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        self._show_on_canvas(canvas)
+
+    # ---------------------------------------------------------- annotations ---
+    def _on_canvas_clicked(self, x: int, y: int, method: int) -> None:
+        if self.display_image is None:
+            return
+        self.segmentor.Set_Clicked([x, y], method)
+        self.segmentor.Create_Mask()
+        mask_image = self.segmentor.Draw_Mask(self.segmentor.mask, self.display_image.copy())
+        self.pending_mask = mask_image
+        bbox = (self.segmentor.x, self.segmentor.y, self.segmentor.w, self.segmentor.h)
+        self.pending_bbox_display = bbox
+
+        scale = self.display_scale or 1.0
+        x_orig = int(round(self.segmentor.x / scale))
+        y_orig = int(round(self.segmentor.y / scale))
+        w_orig = int(round(self.segmentor.w / scale))
+        h_orig = int(round(self.segmentor.h / scale))
+        self.pending_bbox_original = (x_orig, y_orig, w_orig, h_orig)
+
+        self._show_on_canvas(mask_image)
+        self._set_status("已生成候选掩膜，填写标签后保存")
+
+    def _clear_pending_annotation(self) -> None:
+        if self.pending_bbox_display is None:
+            return
+        # 16777219 == Qt.Key_Backspace to mirror the original behaviour
+        self.segmentor.Key_Event(16777219)
+        self.pending_mask = None
+        self.pending_bbox_display = None
+        self.pending_bbox_original = None
+        self.label_edit.clear()
+        self._render_with_overlays()
+        self._set_status("已撤销当前掩膜")
+
+    def _save_annotation(self) -> None:
+        if not self.pending_bbox_original or not self.pending_bbox_display:
+            upWindowsh("请先点击图片生成标注")
+            return
+        label_text = self.label_edit.text().strip()
+        if not label_text:
+            upWindowsh("请输入标签名称")
+            return
+        if self.save_path is None or self.current_image_path is None:
+            upWindowsh("请先设置保存路径")
+            return
+
+        x_disp, y_disp, w_disp, h_disp = self.pending_bbox_display
+        rect = (x_disp, y_disp, x_disp + w_disp, y_disp + h_disp)
+        self.display_rects.append(rect)
+        self.annotation_list.addItem(label_text)
+
+        x_orig, y_orig, w_orig, h_orig = self.pending_bbox_original
+        result, file_path, size = xml_message(
+            str(self.save_path),
+            Path(self.current_image_path).stem,
+            self.original_size[0],
+            self.original_size[1],
+            label_text,
+            x_orig,
+            y_orig,
+            w_orig,
+            h_orig,
+        )
+        self.current_labels.append(result)
+        self._persist_annotations(Path(self.current_image_path), Path(file_path).stem, size, self.current_labels)
+
+        self.segmentor.Key_Event(83)  # Qt.Key_S: confirm the mask inside SAM
+        self.pending_mask = None
+        self.pending_bbox_display = None
+        self.pending_bbox_original = None
+        self.label_edit.clear()
+        self._render_with_overlays()
+        self._set_status("已保存标注")
+
+    def _delete_selected_annotation(self) -> None:
+        row = self.annotation_list.currentRow()
+        if row < 0 or row >= len(self.current_labels):
+            return
+
+        del self.current_labels[row]
+        del self.display_rects[row]
+        self.annotation_list.takeItem(row)
+
+        if self.current_image_path and self.save_path:
+            if self.current_labels:
+                base = Path(self.current_image_path)
+                self._persist_annotations(base, base.stem, self.original_size, self.current_labels)
+            else:
+                self._remove_annotation_files()
+        self._render_with_overlays()
+        self._set_status("已删除标注")
+        self.delete_button.setEnabled(False)
+
+    def _on_annotation_selected(self) -> None:
+        has_selection = self.annotation_list.currentRow() >= 0
+        self.delete_button.setEnabled(has_selection)
+
+    def _remove_annotation_files(self) -> None:
+        if self.save_path is None or self.current_image_path is None:
+            return
+        base_path = self.save_path / Path(self.current_image_path).stem
+        xml_path = base_path.with_suffix(".xml")
+        txt_path = base_path.with_suffix(".txt")
+        for path in (xml_path, txt_path):
+            if path.exists():
+                path.unlink()
+
+    def _persist_annotations(
+        self,
+        image_path: Path,
+        image_name: Path,
+        size: Tuple[int, int, int],
+        labels: List[dict],
+    ) -> None:
+        if self.save_path is None:
+            return
+        base_path = self.save_path / image_name
         if self.annotation_format == "YOLO":
             write_yolo_labels(base_path, size, labels)
             xml_path = base_path.with_suffix(".xml")
@@ -767,24 +451,93 @@ class MainFunc(QMainWindow):
                 xml_path.unlink()
         else:
             xml_path = base_path.with_suffix(".xml")
-            xml(image_path, str(xml_path), size, labels)
+            xml_labels: List[dict] = []
+            for label in labels:
+                x_min, y_min, width, height = label["bndbox"][:4]
+                xmax = x_min + width
+                ymax = y_min + height
+                xml_labels.append({**label, "bndbox": [x_min, y_min, xmax, ymax]})
+            xml(str(image_path), str(xml_path), size, xml_labels)
             txt_path = base_path.with_suffix(".txt")
             if txt_path.exists():
                 txt_path.unlink()
-                            
 
-    def Btn_Start_Marking(self):
-        # 禁用开始检测打标按钮
-        self.ui.pushButton_start_marking.setEnabled(False)
-        if self.video_path and self.output_dir:
-            # 创建并启动工作线程
-            self.worker_thread = VideoProcessingThread(self.AVT, self.video_path, self.output_dir,self.clicked_x, self.clicked_y, self.method,self.text,self.save_path)
-            self.worker_thread.finished.connect(self.on_video_processing_complete)
-            self.worker_thread.start()
-            
+    def _load_existing_annotations(self) -> None:
+        if self.save_path is None or self.current_image_path is None:
+            self._render_with_overlays()
+            return
+        image_name = Path(self.current_image_path).stem
+        base_path = self.save_path / image_name
+        preferred = [self.annotation_format]
+        fallback = "YOLO" if self.annotation_format == "XML" else "XML"
+        preferred.append(fallback)
 
-        else:
-            upWindowsh("请先选择视频和保存路径")
+        labels: List[dict] = []
+        rects: List[Tuple[int, int, int, int]] = []
 
-        
+        for fmt in preferred:
+            if fmt == "YOLO":
+                loaded, boxes, names = load_yolo_labels(
+                    base_path.with_suffix(".txt"),
+                    self.original_size[0],
+                    self.original_size[1],
+                )
+                if not loaded:
+                    continue
+                labels = loaded
+                rects = [
+                    (
+                        int(round(x1 * self.display_scale)),
+                        int(round(y1 * self.display_scale)),
+                        int(round(x2 * self.display_scale)),
+                        int(round(y2 * self.display_scale)),
+                    )
+                    for x1, y1, x2, y2 in boxes
+                ]
+                self.annotation_list.clear()
+                for name in names:
+                    self.annotation_list.addItem(name)
+                break
+            else:
+                xml_path = base_path.with_suffix(".xml")
+                if not xml_path.exists():
+                    continue
+                labels = get_labels(str(xml_path))
+                self.annotation_list.clear()
+                for label in labels:
+                    self.annotation_list.addItem(label["name"])
+                rects = []
+                for raw in labels:
+                    xmin, ymin, xmax, ymax = raw["bndbox"]
+                    width = xmax - xmin if xmax > xmin else xmax
+                    height = ymax - ymin if ymax > ymin else ymax
+                    x1_disp = int(round(xmin * self.display_scale))
+                    y1_disp = int(round(ymin * self.display_scale))
+                    x2_disp = int(round((xmin + width) * self.display_scale))
+                    y2_disp = int(round((ymin + height) * self.display_scale))
+                    rects.append((x1_disp, y1_disp, x2_disp, y2_disp))
+                    raw["bndbox"] = [xmin, ymin, width, height]
+                break
 
+        self.current_labels = labels
+        self.display_rects = rects
+        self.pending_mask = None
+        self.pending_bbox_display = None
+        self.pending_bbox_original = None
+        self.label_edit.clear()
+        self.annotation_list.clearSelection()
+        self.delete_button.setEnabled(False)
+        self._render_with_overlays()
+
+
+def main() -> None:
+    import sys
+
+    app = QtWidgets.QApplication(sys.argv)
+    window = LabelerMainWindow()
+    window.show()
+    sys.exit(app.exec_())
+
+
+if __name__ == "__main__":
+    main()
