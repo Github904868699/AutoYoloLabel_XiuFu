@@ -26,7 +26,7 @@ class VideoProcessingThread(QThread):
 
     def __init__(self, avt, video_path, output_dir, clicks, save_path):
         super().__init__()
-        self.AVT = AnythingVideo_TW()
+        self.AVT = avt if avt is not None else AnythingVideo_TW()
         self.video_path = video_path
         self.output_dir = output_dir
         self.clicks = clicks or []
@@ -36,6 +36,14 @@ class VideoProcessingThread(QThread):
 
     def run(self):
         try:
+            self.AVT.video_segments = {}
+            self.AVT.target_points = {}
+            self.AVT.target_methods = {}
+            self.AVT.target_labels = {}
+            self.AVT.object_boxes = {}
+            self.AVT.out_obj_ids = None
+            self.AVT.out_mask_logits = None
+
             # 创建输出目录和mask子目录
             os.makedirs(self.output_dir, exist_ok=True)
             mask_dir = os.path.join(self.output_dir, "mask")
@@ -513,12 +521,30 @@ class MainFunc(QMainWindow):
             self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
             # 启用"开始检测打标"按钮
             self.ui.pushButton_start_marking.setEnabled(True)
-            if self.clicked_x is not None and self.clicked_y is not None:
-                self.video_clicks.append({
-                    "coords": [self.clicked_x, self.clicked_y],
-                    "method": self.method,
+            points = [list(pt) for pt in getattr(self.AT, "coords", [])]
+            methods = list(getattr(self.AT, "methods", []))
+            if not points and self.clicked_x is not None and self.clicked_y is not None:
+                points = [[self.clicked_x, self.clicked_y]]
+            if not methods and self.method is not None:
+                methods = [self.method]
+            if points and methods:
+                click_payload = {
+                    "points": points,
+                    "methods": methods,
                     "label": text,
-                })
+                }
+                if self.clicked_x is not None and self.clicked_y is not None:
+                    click_payload["coords"] = [self.clicked_x, self.clicked_y]
+                if self.method is not None:
+                    click_payload["method"] = self.method
+                self.video_clicks.append(click_payload)
+
+            self.AT.coords = []
+            self.AT.methods = []
+            self.AT.option = False
+            self.clicked_x = None
+            self.clicked_y = None
+            self.method = None
         # 重新启用点击事件，允许继续添加下一个目标
         if self.is_video_mode:
             self.ui.label_4.mousePressEvent = self.mouse_press_event
