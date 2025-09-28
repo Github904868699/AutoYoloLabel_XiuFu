@@ -74,6 +74,34 @@ class MainFunc(QMainWindow):
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
 
+        tool_actions = [
+            (self.ui.openVideoButton, self.ui.actionOpen_Video),
+            (self.ui.openDirButton, self.ui.actionOpen_Dir),
+            (self.ui.changeSaveDirButton, self.ui.actionChange_Save_Dir),
+            (self.ui.videoMarkingButton, self.ui.actionVideo_marking),
+            (self.ui.nextImageButton, self.ui.actionNext_Image),
+            (self.ui.prevImageButton, self.ui.actionPrev_Image),
+            (self.ui.createRectBoxButton, self.ui.actionCreate_RectBox),
+        ]
+        for button, action in tool_actions:
+            button.setDefaultAction(action)
+        self.ui.toolsFrame.setStyleSheet(
+            "QFrame#toolsFrame {"
+            "    background-color: #f5f7fa;"
+            "    border-right: 1px solid #d0d5dd;"
+            "}"
+            "QToolButton {"
+            "    font: 11pt 'Microsoft YaHei';"
+            "    padding: 6px 4px;"
+            "}"
+            "QToolButton:hover {"
+            "    background-color: #e8eef7;"
+            "}"
+            "QToolButton:pressed {"
+            "    background-color: #d0d8e5;"
+            "}"
+        )
+
         self.sld_video_pressed=False
 
 

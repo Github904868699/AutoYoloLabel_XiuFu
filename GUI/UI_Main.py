@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'UI_Main.ui'
+# Form implementation generated from reading ui file 'GUI/UI/UI_Main.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.11
 #
@@ -9,42 +9,6 @@
 
 
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtMultimediaWidgets import QVideoWidget
-from PyQt5.QtMultimedia import QMediaPlayer, QMediaContent
-
-
-# 鼠标绘画事件
-class MyLabel(QtWidgets.QLabel):
-    def __init__(self, parent=None):
-        super(MyLabel, self).__init__(parent)
-        self.x0, self.y0 = 0, 0  # 鼠标按下的初始位置
-        self.x1, self.y1 = 0, 0  # 鼠标当前位置
-        self.flag = False  # 鼠标是否按下
-        self.move = False  # 是否在移动状态
-
-    def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
-            self.x0, self.y0 = event.pos().x(), event.pos().y()
-            self.flag = True
-
-    def mouseMoveEvent(self, event):
-        if self.flag:
-            self.move = True
-            self.x1, self.y1 = event.pos().x(), event.pos().y()
-            self.update()
-
-    def mouseReleaseEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
-            self.flag = False
-            self.move = False
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        if self.flag and self.move:
-            painter = QtGui.QPainter(self)
-            painter.setPen(QtGui.QPen(QtCore.Qt.red, 2, QtCore.Qt.SolidLine))
-            painter.drawRect(QtCore.QRect(self.x0, self.y0, self.x1 - self.x0, self.y1 - self.y0))
-
 
 
 class Ui_MainWindow(object):
@@ -52,7 +16,7 @@ class Ui_MainWindow(object):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(1618, 947)
         icon = QtGui.QIcon()
-        icon.addPixmap(QtGui.QPixmap("GUI/icons/logo.ico"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon.addPixmap(QtGui.QPixmap("GUI/UI/../icons/logo.jpg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         MainWindow.setWindowIcon(icon)
         self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.centralwidget.setObjectName("centralwidget")
@@ -67,45 +31,76 @@ class Ui_MainWindow(object):
         self.splitter = QtWidgets.QSplitter(self.frame)
         self.splitter.setOrientation(QtCore.Qt.Horizontal)
         self.splitter.setObjectName("splitter")
+        self.toolsFrame = QtWidgets.QFrame(self.splitter)
+        self.toolsFrame.setMinimumSize(QtCore.QSize(0, 0))
+        self.toolsFrame.setFrameShape(QtWidgets.QFrame.StyledPanel)
+        self.toolsFrame.setFrameShadow(QtWidgets.QFrame.Raised)
+        self.toolsFrame.setObjectName("toolsFrame")
+        self.verticalLayout_tools = QtWidgets.QVBoxLayout(self.toolsFrame)
+        self.verticalLayout_tools.setContentsMargins(8, 8, 8, 8)
+        self.verticalLayout_tools.setSpacing(8)
+        self.verticalLayout_tools.setObjectName("verticalLayout_tools")
+        self.openVideoButton = QtWidgets.QToolButton(self.toolsFrame)
+        self.openVideoButton.setMinimumSize(QtCore.QSize(0, 60))
+        self.openVideoButton.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.openVideoButton.setObjectName("openVideoButton")
+        self.verticalLayout_tools.addWidget(self.openVideoButton)
+        self.openDirButton = QtWidgets.QToolButton(self.toolsFrame)
+        self.openDirButton.setMinimumSize(QtCore.QSize(0, 60))
+        self.openDirButton.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.openDirButton.setObjectName("openDirButton")
+        self.verticalLayout_tools.addWidget(self.openDirButton)
+        self.changeSaveDirButton = QtWidgets.QToolButton(self.toolsFrame)
+        self.changeSaveDirButton.setMinimumSize(QtCore.QSize(0, 60))
+        self.changeSaveDirButton.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.changeSaveDirButton.setObjectName("changeSaveDirButton")
+        self.verticalLayout_tools.addWidget(self.changeSaveDirButton)
+        self.videoMarkingButton = QtWidgets.QToolButton(self.toolsFrame)
+        self.videoMarkingButton.setMinimumSize(QtCore.QSize(0, 60))
+        self.videoMarkingButton.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.videoMarkingButton.setObjectName("videoMarkingButton")
+        self.verticalLayout_tools.addWidget(self.videoMarkingButton)
+        self.nextImageButton = QtWidgets.QToolButton(self.toolsFrame)
+        self.nextImageButton.setMinimumSize(QtCore.QSize(0, 60))
+        self.nextImageButton.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.nextImageButton.setObjectName("nextImageButton")
+        self.verticalLayout_tools.addWidget(self.nextImageButton)
+        self.prevImageButton = QtWidgets.QToolButton(self.toolsFrame)
+        self.prevImageButton.setMinimumSize(QtCore.QSize(0, 60))
+        self.prevImageButton.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.prevImageButton.setObjectName("prevImageButton")
+        self.verticalLayout_tools.addWidget(self.prevImageButton)
+        self.createRectBoxButton = QtWidgets.QToolButton(self.toolsFrame)
+        self.createRectBoxButton.setMinimumSize(QtCore.QSize(0, 60))
+        self.createRectBoxButton.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
+        self.createRectBoxButton.setObjectName("createRectBoxButton")
+        self.verticalLayout_tools.addWidget(self.createRectBoxButton)
+        spacerItem = QtWidgets.QSpacerItem(20, 40, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding)
+        self.verticalLayout_tools.addItem(spacerItem)
         self.scrollArea = QtWidgets.QScrollArea(self.splitter)
+        self.scrollArea.setMinimumSize(QtCore.QSize(0, 0))
         self.scrollArea.setWidgetResizable(True)
         self.scrollArea.setObjectName("scrollArea")
         self.scrollAreaWidgetContents = QtWidgets.QWidget()
-        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 1298, 848))
-        self.scrollAreaWidgetContents.setMinimumSize(QtCore.QSize(1300, 850))
+        self.scrollAreaWidgetContents.setGeometry(QtCore.QRect(0, 0, 1600, 850))
+        self.scrollAreaWidgetContents.setMinimumSize(QtCore.QSize(1600, 850))
         self.scrollAreaWidgetContents.setObjectName("scrollAreaWidgetContents")
         self.label_3 = QtWidgets.QLabel(self.scrollAreaWidgetContents)
         self.label_3.setGeometry(QtCore.QRect(9, 9, 2000, 1000))
         self.label_3.setStyleSheet("background: gray;")
         self.label_3.setText("")
         self.label_3.setObjectName("label_3")
-
-        self.videoWidget = QVideoWidget(self.label_3)
-
-        self.mediaPlayer = QMediaPlayer()
-        self.mediaPlayer.setVideoOutput(self.videoWidget)
-        
         self.label_4 = QtWidgets.QLabel(self.scrollAreaWidgetContents)
         self.label_4.setGeometry(QtCore.QRect(10, 10, 2000, 1000))
         self.label_4.setMouseTracking(True)
         self.label_4.setText("")
         self.label_4.setObjectName("label_4")
-
-        # 如果 scrollAreaWidgetContents 没有布局，给它设置一个默认布局
-        if not self.scrollAreaWidgetContents.layout():
-            self.layout = QtWidgets.QVBoxLayout(self.scrollAreaWidgetContents)
-            self.scrollAreaWidgetContents.setLayout(self.layout)
-
         self.scrollArea.setWidget(self.scrollAreaWidgetContents)
         self.layoutWidget = QtWidgets.QWidget(self.splitter)
         self.layoutWidget.setObjectName("layoutWidget")
         self.verticalLayout = QtWidgets.QVBoxLayout(self.layoutWidget)
         self.verticalLayout.setContentsMargins(0, 0, 0, 0)
         self.verticalLayout.setObjectName("verticalLayout")
-
-        MainWindow.setCentralWidget(self.centralwidget)
-        self.setSplitterSizes()
-
         self.label = QtWidgets.QLabel(self.layoutWidget)
         self.label.setObjectName("label")
         self.verticalLayout.addWidget(self.label)
@@ -113,13 +108,14 @@ class Ui_MainWindow(object):
         self.comboBox.setObjectName("comboBox")
         self.comboBox.addItem("")
         self.comboBox.addItem("")
-        self.comboBox.setFocusPolicy(QtCore.Qt.NoFocus)
         self.verticalLayout.addWidget(self.comboBox)
-
         self.currentImageLabel = QtWidgets.QLabel(self.layoutWidget)
-        self.currentImageLabel.setObjectName("currentImageLabel")
         self.currentImageLabel.setWordWrap(True)
+        self.currentImageLabel.setObjectName("currentImageLabel")
         self.verticalLayout.addWidget(self.currentImageLabel)
+        self.label_2 = QtWidgets.QLabel(self.layoutWidget)
+        self.label_2.setObjectName("label_2")
+        self.verticalLayout.addWidget(self.label_2)
         self.frame_2 = QtWidgets.QFrame(self.layoutWidget)
         self.frame_2.setMinimumSize(QtCore.QSize(0, 50))
         self.frame_2.setFrameShape(QtWidgets.QFrame.StyledPanel)
@@ -127,14 +123,6 @@ class Ui_MainWindow(object):
         self.frame_2.setObjectName("frame_2")
         self.verticalLayout_2 = QtWidgets.QVBoxLayout(self.frame_2)
         self.verticalLayout_2.setObjectName("verticalLayout_2")
-        
-        # 添加进度条
-        self.progressBar = QtWidgets.QProgressBar(self.frame_2)
-        self.progressBar.setObjectName("progressBar")
-        self.progressBar.setValue(0)
-        self.progressBar.hide()  # 初始状态隐藏
-        self.verticalLayout_2.addWidget(self.progressBar)
-        
         self.label_5 = QtWidgets.QLabel(self.frame_2)
         self.label_5.setStyleSheet("font: 75 11pt \"Arial\";\n"
 "")
@@ -170,32 +158,45 @@ class Ui_MainWindow(object):
         self.pushButton_5.setMinimumSize(QtCore.QSize(0, 30))
         self.pushButton_5.setObjectName("pushButton_5")
         self.verticalLayout_2.addWidget(self.pushButton_5)
-
-       # 添加"视频打标"标签
         self.label_video_marking = QtWidgets.QLabel(self.frame_2)
         self.label_video_marking.setStyleSheet("font: 75 11pt \"Arial\";")
         self.label_video_marking.setAlignment(QtCore.Qt.AlignLeading|QtCore.Qt.AlignLeft|QtCore.Qt.AlignTop)
         self.label_video_marking.setObjectName("label_video_marking")
         self.verticalLayout_2.addWidget(self.label_video_marking)
-
-        # 添加"开始检测打标"按钮
         self.pushButton_start_marking = QtWidgets.QPushButton(self.frame_2)
         self.pushButton_start_marking.setEnabled(False)
         self.pushButton_start_marking.setMinimumSize(QtCore.QSize(0, 30))
         self.pushButton_start_marking.setObjectName("pushButton_start_marking")
         self.verticalLayout_2.addWidget(self.pushButton_start_marking)
-
         self.verticalLayout.addWidget(self.frame_2)
-        self.label_2 = QtWidgets.QLabel(self.layoutWidget)
-        self.label_2.setObjectName("label_2")
-        self.verticalLayout.addWidget(self.label_2)
         self.listWidget = QtWidgets.QListWidget(self.layoutWidget)
         self.listWidget.setObjectName("listWidget")
-
-        self.listWidget.setFocusPolicy(QtCore.Qt.NoFocus)
-
         self.verticalLayout.addWidget(self.listWidget)
         self.horizontalLayout_2.addWidget(self.splitter)
+        icon_size = QtCore.QSize(45, 45)
+        for button in (
+            self.openVideoButton,
+            self.openDirButton,
+            self.changeSaveDirButton,
+            self.videoMarkingButton,
+            self.nextImageButton,
+            self.prevImageButton,
+            self.createRectBoxButton,
+        ):
+            button.setIconSize(icon_size)
+        total_width = max(MainWindow.size().width(), 1)
+        left_size = max(150, int(total_width * 0.15))
+        center_size = max(300, int(total_width * 0.65))
+        right_size = total_width - left_size - center_size
+        if right_size <= 0:
+            right_size = max(200, total_width // 5)
+            center_size = max(300, total_width - left_size - right_size)
+        self.splitter.setSizes([left_size, center_size, right_size])
+        self.splitter.setStretchFactor(0, 0)
+        self.splitter.setStretchFactor(1, 1)
+        self.splitter.setStretchFactor(2, 0)
+        self.splitter.setCollapsible(0, False)
+        self.splitter.setCollapsible(1, False)
         self.horizontalLayout.addWidget(self.frame)
         MainWindow.setCentralWidget(self.centralwidget)
         self.menubar = QtWidgets.QMenuBar(MainWindow)
@@ -205,125 +206,75 @@ class Ui_MainWindow(object):
         self.statusbar = QtWidgets.QStatusBar(MainWindow)
         self.statusbar.setObjectName("statusbar")
         MainWindow.setStatusBar(self.statusbar)
-        self.toolBar = QtWidgets.QToolBar(MainWindow)
-        self.toolBar.setEnabled(True)
-        self.toolBar.setIconSize(QtCore.QSize(45, 45))
-        self.toolBar.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
-        self.toolBar.setObjectName("toolBar")
-        MainWindow.addToolBar(QtCore.Qt.LeftToolBarArea, self.toolBar)
         self.actionOpen_Dir = QtWidgets.QAction(MainWindow)
         icon1 = QtGui.QIcon()
-        icon1.addPixmap(QtGui.QPixmap("GUI/icons/open.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon1.addPixmap(QtGui.QPixmap("GUI/UI/../icons/open.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.actionOpen_Dir.setIcon(icon1)
         self.actionOpen_Dir.setObjectName("actionOpen_Dir")
-
-        self.actionOpen_Dir.triggered.connect(self.enableLabel4)
-
         self.actionChange_Save_Dir = QtWidgets.QAction(MainWindow)
         icon2 = QtGui.QIcon()
-        icon2.addPixmap(QtGui.QPixmap("GUI/icons/save.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon2.addPixmap(QtGui.QPixmap("GUI/UI/../icons/save.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.actionChange_Save_Dir.setIcon(icon2)
         self.actionChange_Save_Dir.setObjectName("actionChange_Save_Dir")
         self.actionNext_Image = QtWidgets.QAction(MainWindow)
         self.actionNext_Image.setEnabled(False)
         icon3 = QtGui.QIcon()
-        icon3.addPixmap(QtGui.QPixmap("GUI/icons/next.jpg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon3.addPixmap(QtGui.QPixmap("GUI/UI/../icons/next.jpg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.actionNext_Image.setIcon(icon3)
         self.actionNext_Image.setObjectName("actionNext_Image")
         self.actionPrev_Image = QtWidgets.QAction(MainWindow)
         self.actionPrev_Image.setEnabled(False)
-        self.actionVideo_marking = QtWidgets.QAction(MainWindow)
-        icon7 = QtGui.QIcon()
-        icon7.addPixmap(QtGui.QPixmap("GUI/icons/Video_marking.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
-        self.actionVideo_marking.setIcon(icon7)
-        self.actionVideo_marking.setObjectName("actionVideo_marking")
-
-        self.actionVideo_marking.triggered.connect(self.enableLabel4)
-
         icon4 = QtGui.QIcon()
-        icon4.addPixmap(QtGui.QPixmap("GUI/icons/prev.jpg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon4.addPixmap(QtGui.QPixmap("GUI/UI/../icons/prev.jpg"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.actionPrev_Image.setIcon(icon4)
         self.actionPrev_Image.setObjectName("actionPrev_Image")
         self.actionCreate_RectBox = QtWidgets.QAction(MainWindow)
         self.actionCreate_RectBox.setEnabled(False)
         icon5 = QtGui.QIcon()
-        icon5.addPixmap(QtGui.QPixmap("GUI/icons/create.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon5.addPixmap(QtGui.QPixmap("GUI/UI/../icons/create.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.actionCreate_RectBox.setIcon(icon5)
         self.actionCreate_RectBox.setObjectName("actionCreate_RectBox")
         self.actionOpen_Video = QtWidgets.QAction(MainWindow)
         icon6 = QtGui.QIcon()
-        icon6.addPixmap(QtGui.QPixmap("GUI/icons/video.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        icon6.addPixmap(QtGui.QPixmap("GUI/UI/../icons/video.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.actionOpen_Video.setIcon(icon6)
         self.actionOpen_Video.setObjectName("actionOpen_Video")
-        
-
-
-        self.actionOpen_Video.triggered.connect(self.disableLabel4)
-
-        self.toolBar.addAction(self.actionOpen_Video)
-        self.toolBar.addAction(self.actionOpen_Dir)
-        self.toolBar.addAction(self.actionChange_Save_Dir)
-        self.toolBar.addAction(self.actionVideo_marking)
-        self.toolBar.addAction(self.actionNext_Image)
-        self.toolBar.addAction(self.actionPrev_Image)
-        self.toolBar.addAction(self.actionCreate_RectBox)
-        
+        self.actionVideo_marking = QtWidgets.QAction(MainWindow)
+        icon7 = QtGui.QIcon()
+        icon7.addPixmap(QtGui.QPixmap("GUI/UI/../icons/Video marking.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
+        self.actionVideo_marking.setIcon(icon7)
+        self.actionVideo_marking.setObjectName("actionVideo_marking")
 
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
-    def setSplitterSizes(self):
-        # 根据当前 splitter 的宽度设置比例
-        total_size = self.splitter.size().width()
-        size1 = int(0.8 * total_size)  # 第一个区域占75%
-        size2 = total_size - size1  # 第二个区域占剩余的20%
-        self.splitter.setSizes([size1, size2])
-
-    def enableLabel4(self):
-        # 点击打开目录后启用 MyLabel
-        self.label_4.deleteLater()  # 删除原来的 QLabel
-        
-        # 创建 MyLabel 实例并添加到布局
-        self.label_4 = MyLabel(self.scrollAreaWidgetContents)
-        self.label_4.setGeometry(QtCore.QRect(10, 10, 2000, 1000))
-        self.label_4.setText("")
-        self.label_4.setObjectName("label_4")
-        self.scrollAreaWidgetContents.layout().addWidget(self.label_4)
-        
-
-
-    def disableLabel4(self):
-        self.label_4.deleteLater()  # 删除原来的 QLabel
-        
-        self.label_4 = QtWidgets.QLabel(self.scrollAreaWidgetContents)
-        self.label_4.setGeometry(QtCore.QRect(10, 10, 2000, 1000))
-        self.label_4.setText("")
-        self.label_4.setObjectName("label_4")
-        self.scrollAreaWidgetContents.layout().addWidget(self.label_4)
-        
-
-
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "Auto Yolo Labeler"))
-        self.label.setText(_translate("MainWindow", "保存类型"))
-        self.comboBox.setItemText(1, _translate("MainWindow", "XML"))
-        self.comboBox.setItemText(0, _translate("MainWindow", "YOLO"))
-        self.currentImageLabel.setText(_translate("MainWindow", ""))
-        self.label_2.setText(_translate("MainWindow", "标签"))
-        self.label_5.setText(_translate("MainWindow", "视频："))
+        MainWindow.setWindowTitle(_translate("MainWindow", "LabelQuick"))
+        self.openVideoButton.setText(_translate("MainWindow", "Open Video"))
+        self.openDirButton.setText(_translate("MainWindow", "Open Dir"))
+        self.changeSaveDirButton.setText(_translate("MainWindow", "Change Save Dir"))
+        self.videoMarkingButton.setText(_translate("MainWindow", "Video Marking"))
+        self.nextImageButton.setText(_translate("MainWindow", "Next Image"))
+        self.prevImageButton.setText(_translate("MainWindow", "Prev Image"))
+        self.createRectBoxButton.setText(_translate("MainWindow", "Create Rect Box"))
+        self.label.setText(_translate("MainWindow", "选择保存类型"))
+        self.comboBox.setItemText(0, _translate("MainWindow", "XML"))
+        self.comboBox.setItemText(1, _translate("MainWindow", "YOLO"))
+        self.currentImageLabel.setText(_translate("MainWindow", "当前图片：-"))
+        self.label_2.setText(_translate("MainWindow", "标签箱"))
+        self.label_5.setText(_translate("MainWindow", "视频操作："))
         self.pushButton.setText(_translate("MainWindow", "开始"))
         self.pushButton_2.setText(_translate("MainWindow", "暂停"))
         self.pushButton_3.setText(_translate("MainWindow", "抽帧"))
-        self.pushButton_5.setText(_translate("MainWindow", "自动抽帧"))
         self.pushButton_4.setText(_translate("MainWindow", "重新播放"))
+        self.pushButton_5.setText(_translate("MainWindow", "自动抽帧"))
         self.label_video_marking.setText(_translate("MainWindow", "视频打标"))
         self.pushButton_start_marking.setText(_translate("MainWindow", "目标跟踪"))
-        self.toolBar.setWindowTitle(_translate("MainWindow", "toolBar"))
         self.actionOpen_Dir.setText(_translate("MainWindow", "Open Dir"))
-        self.actionOpen_Dir.setShortcut(_translate("MainWindow", "E"))
+        self.actionOpen_Dir.setShortcut(_translate("MainWindow", "Ctrl+U"))
         self.actionChange_Save_Dir.setText(_translate("MainWindow", "Change Save Dir"))
-        self.actionChange_Save_Dir.setShortcut(_translate("MainWindow", "S"))
+        self.actionChange_Save_Dir.setShortcut(_translate("MainWindow", "Ctrl+R"))
         self.actionNext_Image.setText(_translate("MainWindow", "Next Image"))
         self.actionNext_Image.setShortcut(_translate("MainWindow", "D"))
         self.actionPrev_Image.setText(_translate("MainWindow", "Prev Image"))
@@ -333,4 +284,3 @@ class Ui_MainWindow(object):
         self.actionOpen_Video.setText(_translate("MainWindow", "Open Video"))
         self.actionOpen_Video.setShortcut(_translate("MainWindow", "V"))
         self.actionVideo_marking.setText(_translate("MainWindow", "Video marking"))
-
