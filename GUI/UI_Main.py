@@ -201,16 +201,12 @@ class Ui_MainWindow(object):
         self.menubar = QtWidgets.QMenuBar(MainWindow)
         self.menubar.setGeometry(QtCore.QRect(0, 0, 1618, 26))
         self.menubar.setObjectName("menubar")
+        self.menuFile = QtWidgets.QMenu(self.menubar)
+        self.menuFile.setObjectName("menuFile")
         MainWindow.setMenuBar(self.menubar)
         self.statusbar = QtWidgets.QStatusBar(MainWindow)
         self.statusbar.setObjectName("statusbar")
         MainWindow.setStatusBar(self.statusbar)
-        self.toolBar = QtWidgets.QToolBar(MainWindow)
-        self.toolBar.setEnabled(True)
-        self.toolBar.setIconSize(QtCore.QSize(45, 45))
-        self.toolBar.setToolButtonStyle(QtCore.Qt.ToolButtonTextUnderIcon)
-        self.toolBar.setObjectName("toolBar")
-        MainWindow.addToolBar(QtCore.Qt.LeftToolBarArea, self.toolBar)
         self.actionOpen_Dir = QtWidgets.QAction(MainWindow)
         icon1 = QtGui.QIcon()
         icon1.addPixmap(QtGui.QPixmap("GUI/icons/open.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
@@ -255,19 +251,20 @@ class Ui_MainWindow(object):
         icon6.addPixmap(QtGui.QPixmap("GUI/icons/video.png"), QtGui.QIcon.Normal, QtGui.QIcon.Off)
         self.actionOpen_Video.setIcon(icon6)
         self.actionOpen_Video.setObjectName("actionOpen_Video")
-        
+
 
 
         self.actionOpen_Video.triggered.connect(self.disableLabel4)
 
-        self.toolBar.addAction(self.actionOpen_Video)
-        self.toolBar.addAction(self.actionOpen_Dir)
-        self.toolBar.addAction(self.actionChange_Save_Dir)
-        self.toolBar.addAction(self.actionVideo_marking)
-        self.toolBar.addAction(self.actionNext_Image)
-        self.toolBar.addAction(self.actionPrev_Image)
-        self.toolBar.addAction(self.actionCreate_RectBox)
-        
+        self.menuFile.addAction(self.actionOpen_Video)
+        self.menuFile.addAction(self.actionOpen_Dir)
+        self.menuFile.addAction(self.actionChange_Save_Dir)
+        self.menuFile.addAction(self.actionVideo_marking)
+        self.menuFile.addAction(self.actionNext_Image)
+        self.menuFile.addAction(self.actionPrev_Image)
+        self.menuFile.addAction(self.actionCreate_RectBox)
+        self.menubar.addAction(self.menuFile.menuAction())
+
 
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
@@ -319,7 +316,7 @@ class Ui_MainWindow(object):
         self.pushButton_4.setText(_translate("MainWindow", "重新播放"))
         self.label_video_marking.setText(_translate("MainWindow", "视频打标"))
         self.pushButton_start_marking.setText(_translate("MainWindow", "目标跟踪"))
-        self.toolBar.setWindowTitle(_translate("MainWindow", "toolBar"))
+        self.menuFile.setTitle(_translate("MainWindow", "文件"))
         self.actionOpen_Dir.setText(_translate("MainWindow", "Open Dir"))
         self.actionOpen_Dir.setShortcut(_translate("MainWindow", "E"))
         self.actionChange_Save_Dir.setText(_translate("MainWindow", "Change Save Dir"))
@@ -333,4 +330,5 @@ class Ui_MainWindow(object):
         self.actionOpen_Video.setText(_translate("MainWindow", "Open Video"))
         self.actionOpen_Video.setShortcut(_translate("MainWindow", "V"))
         self.actionVideo_marking.setText(_translate("MainWindow", "Video marking"))
+        self.actionVideo_marking.setShortcut(_translate("MainWindow", "M"))
 
