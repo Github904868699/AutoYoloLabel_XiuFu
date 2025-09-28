@@ -67,7 +67,6 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         self.original_size: Tuple[int, int, int] = (0, 0, 3)
 
         self.current_labels: List[dict] = []
-        self.display_rects: List[Tuple[int, int, int, int]] = []
         self.pending_mask: Optional[np.ndarray] = None
         self.pending_bbox_display: Optional[Tuple[int, int, int, int]] = None
         self.pending_bbox_original: Optional[Tuple[int, int, int, int]] = None
@@ -79,44 +78,52 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         # UI ----------------------------------------------------------------
         self._build_ui()
         self._connect_signals()
+        self._setup_shortcuts()
+
+        self.statusBar().showMessage("准备就绪")
 
     # ------------------------------------------------------------------ UI ---
     def _build_ui(self) -> None:
         central = QtWidgets.QWidget(self)
         self.setCentralWidget(central)
 
-        main_layout = QtWidgets.QHBoxLayout(central)
+        main_layout = QtWidgets.QVBoxLayout(central)
         main_layout.setContentsMargins(12, 12, 12, 12)
-        main_layout.setSpacing(12)
+        main_layout.setSpacing(8)
+
+        control_row = QtWidgets.QHBoxLayout()
+        self.open_button = QtWidgets.QPushButton("打开图片夹")
+        self.save_dir_button = QtWidgets.QPushButton("标注保存位置")
+        control_row.addWidget(self.open_button)
+        control_row.addWidget(self.save_dir_button)
+
+        control_row.addSpacing(12)
+        control_row.addWidget(QtWidgets.QLabel("标注格式："))
+        self.format_combo = QtWidgets.QComboBox()
+        self.format_combo.addItems(["XML", "YOLO"])
+        control_row.addWidget(self.format_combo)
+        control_row.addStretch(1)
+
+        self.current_image_label = QtWidgets.QLabel("未加载图片")
+        self.current_image_label.setStyleSheet("font-weight: 600;")
+        control_row.addWidget(self.current_image_label)
+        main_layout.addLayout(control_row)
+
+        self.hint_label = QtWidgets.QLabel(
+            "提示：A 上一张，D 下一张，Q 撤销当前掩膜。左键前景，右键背景。"
+        )
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setStyleSheet("color: #666666;")
+        main_layout.addWidget(self.hint_label)
 
         splitter = QtWidgets.QSplitter(QtCore.Qt.Horizontal, self)
-        main_layout.addWidget(splitter)
+        main_layout.addWidget(splitter, 1)
 
         # Left column -----------------------------------------------------
         left_panel = QtWidgets.QWidget()
         left_layout = QtWidgets.QVBoxLayout(left_panel)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
-
-        header_label = QtWidgets.QLabel("数据集管理")
-        header_label.setStyleSheet("font-size: 16px; font-weight: 600;")
-        left_layout.addWidget(header_label)
-
-        button_row = QtWidgets.QHBoxLayout()
-        self.open_button = QtWidgets.QPushButton("打开图片夹")
-        self.save_dir_button = QtWidgets.QPushButton("标注保存位置")
-        button_row.addWidget(self.open_button)
-        button_row.addWidget(self.save_dir_button)
-        left_layout.addLayout(button_row)
-
-        format_row = QtWidgets.QHBoxLayout()
-        format_label = QtWidgets.QLabel("标注格式：")
-        self.format_combo = QtWidgets.QComboBox()
-        self.format_combo.addItems(["XML", "YOLO"])
-        format_row.addWidget(format_label)
-        format_row.addWidget(self.format_combo)
-        format_row.addStretch(1)
-        left_layout.addLayout(format_row)
 
         self.image_list = QtWidgets.QListWidget()
         self.image_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
@@ -138,46 +145,27 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
 
-        info_row = QtWidgets.QHBoxLayout()
-        self.current_image_label = QtWidgets.QLabel("未加载图片")
-        self.current_image_label.setStyleSheet("font-weight: 600;")
-        info_row.addWidget(self.current_image_label)
-        info_row.addStretch(1)
-        self.status_label = QtWidgets.QLabel("准备就绪")
-        self.status_label.setStyleSheet("color: #666666;")
-        info_row.addWidget(self.status_label)
-        right_layout.addLayout(info_row)
+        self.canvas_scroll = QtWidgets.QScrollArea()
+        self.canvas_scroll.setWidgetResizable(True)
+        self.canvas_scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        self.canvas_scroll.setAlignment(QtCore.Qt.AlignCenter)
 
         self.canvas = ImageCanvas()
-        self.canvas.setMinimumSize(640, 480)
-        scroll_area = QtWidgets.QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setFrameShape(QtWidgets.QFrame.NoFrame)
-        scroll_area.setAlignment(QtCore.Qt.AlignCenter)
-        scroll_area.setWidget(self.canvas)
-        right_layout.addWidget(scroll_area, 1)
-
-        self.hint_label = QtWidgets.QLabel(
-            "左键添加前景点，右键添加背景点。满意后输入标签名称点击保存。"
-        )
-        self.hint_label.setWordWrap(True)
-        self.hint_label.setStyleSheet("color: #666666;")
-        right_layout.addWidget(self.hint_label)
+        self.canvas_scroll.setWidget(self.canvas)
+        right_layout.addWidget(self.canvas_scroll, 3)
 
         form_row = QtWidgets.QHBoxLayout()
         self.label_edit = QtWidgets.QLineEdit()
         self.label_edit.setPlaceholderText("标签名称…")
-        self.save_button = QtWidgets.QPushButton("保存标注")
-        self.clear_button = QtWidgets.QPushButton("撤销本次")
         form_row.addWidget(self.label_edit, 1)
+        self.save_button = QtWidgets.QPushButton("保存标注")
         form_row.addWidget(self.save_button)
+        self.clear_button = QtWidgets.QPushButton("撤销掩膜")
         form_row.addWidget(self.clear_button)
         right_layout.addLayout(form_row)
 
         annotation_header = QtWidgets.QHBoxLayout()
-        annotation_label = QtWidgets.QLabel("已有标注")
-        annotation_label.setStyleSheet("font-weight: 600;")
-        annotation_header.addWidget(annotation_label)
+        annotation_header.addWidget(QtWidgets.QLabel("已有标注"))
         annotation_header.addStretch(1)
         self.delete_button = QtWidgets.QPushButton("删除选中")
         self.delete_button.setEnabled(False)
@@ -187,7 +175,7 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         self.annotation_list = QtWidgets.QListWidget()
         self.annotation_list.setSelectionMode(QtWidgets.QAbstractItemView.SingleSelection)
         self.annotation_list.setAlternatingRowColors(True)
-        right_layout.addWidget(self.annotation_list, 1)
+        right_layout.addWidget(self.annotation_list, 2)
 
         splitter.addWidget(right_panel)
         splitter.setStretchFactor(0, 0)
@@ -206,9 +194,69 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         self.annotation_list.itemSelectionChanged.connect(self._on_annotation_selected)
         self.format_combo.currentTextChanged.connect(self._on_format_changed)
 
+    def _setup_shortcuts(self) -> None:
+        self._shortcuts: List[QtWidgets.QShortcut] = []
+        for key, handler in (
+            ("A", self._go_previous),
+            ("D", self._go_next),
+            ("Q", self._clear_pending_annotation),
+        ):
+            shortcut = QtWidgets.QShortcut(QtGui.QKeySequence(key), self)
+            shortcut.setContext(QtCore.Qt.ApplicationShortcut)
+            shortcut.activated.connect(handler)
+            self._shortcuts.append(shortcut)
+
     # -------------------------------------------------------------- helpers ---
     def _set_status(self, message: str) -> None:
-        self.status_label.setText(message)
+        self.statusBar().showMessage(message)
+
+    def _reset_pending_state(self, clear_label: bool = True) -> None:
+        self.pending_mask = None
+        self.pending_bbox_display = None
+        self.pending_bbox_original = None
+        if clear_label and hasattr(self, "label_edit"):
+            self.label_edit.clear()
+
+    def _available_canvas_space(self) -> Tuple[int, int]:
+        if not hasattr(self, "canvas_scroll") or self.canvas_scroll is None:
+            return MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT
+        viewport = self.canvas_scroll.viewport()
+        width = viewport.width()
+        height = viewport.height()
+        if width <= 0 or height <= 0:
+            width = max(self.canvas_scroll.width(), 1)
+            height = max(self.canvas_scroll.height(), 1)
+        return max(width, 1), max(height, 1)
+
+    def _update_display_image(self, preserve_label: bool = True) -> None:
+        if self.original_image is None:
+            self.canvas.clear()
+            return
+
+        self._reset_pending_state(clear_label=not preserve_label)
+
+        h, w = self.original_image.shape[:2]
+        avail_w, avail_h = self._available_canvas_space()
+        if avail_w <= 0 or avail_h <= 0:
+            avail_w, avail_h = MAX_DISPLAY_WIDTH, MAX_DISPLAY_HEIGHT
+        scale = min(avail_w / w, avail_h / h, 1.0)
+        if scale <= 0:
+            scale = 1.0
+
+        display_size = (int(round(w * scale)), int(round(h * scale)))
+        if scale != 1.0:
+            display = cv2.resize(
+                self.original_image,
+                display_size,
+                interpolation=cv2.INTER_AREA,
+            )
+        else:
+            display = self.original_image.copy()
+
+        self.display_scale = scale
+        self.display_image = display
+        self.segmentor.Set_Image(display.copy())
+        self._render_with_overlays()
 
     def _open_directory(self) -> None:
         directory = QtWidgets.QFileDialog.getExistingDirectory(self, "选择图片文件夹")
@@ -279,26 +327,12 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         channels = image.shape[2] if image.ndim == 3 else 1
         self.original_size = (w, h, channels)
 
-        scale = min(MAX_DISPLAY_WIDTH / w, MAX_DISPLAY_HEIGHT / h, 1.0)
-        if scale != 1.0:
-            display = cv2.resize(image, (int(w * scale), int(h * scale)), interpolation=cv2.INTER_AREA)
-        else:
-            display = image.copy()
-        self.display_scale = scale
-        self.display_image = display
-        self.segmentor.Set_Image(display.copy())
-
         self.current_labels = []
-        self.display_rects = []
-        self.pending_mask = None
-        self.pending_bbox_display = None
-        self.pending_bbox_original = None
         self.annotation_list.clear()
-        self.label_edit.clear()
         self.delete_button.setEnabled(False)
 
         self.current_image_label.setText(os.path.basename(path))
-        self._show_on_canvas(display)
+        self._update_display_image(preserve_label=False)
         self._load_existing_annotations()
         self._set_status("等待点击生成掩膜…")
 
@@ -317,14 +351,29 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
             QtGui.QImage.Format_RGB888,
         )
         pixmap = QtGui.QPixmap.fromImage(q_image)
-        self.canvas.setFixedSize(w, h)
         self.canvas.setPixmap(pixmap)
+        self.canvas.resize(pixmap.size())
+        self.canvas.update()
 
     def _render_with_overlays(self) -> None:
         if self.display_image is None:
             return
         canvas = self.display_image.copy()
-        for x1, y1, x2, y2 in self.display_rects:
+        scale = self.display_scale or 1.0
+        for label in self.current_labels:
+            x_min, y_min, width_or_xmax, height_or_ymax = label["bndbox"][:4]
+            width = width_or_xmax
+            height = height_or_ymax
+            if width <= 0 and width_or_xmax > x_min:
+                width = width_or_xmax - x_min
+            if height <= 0 and height_or_ymax > y_min:
+                height = height_or_ymax - y_min
+            if width <= 0 or height <= 0:
+                continue
+            x1 = int(round(x_min * scale))
+            y1 = int(round(y_min * scale))
+            x2 = int(round((x_min + width) * scale))
+            y2 = int(round((y_min + height) * scale))
             cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 255, 0), 2)
         self._show_on_canvas(canvas)
 
@@ -350,14 +399,12 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         self._set_status("已生成候选掩膜，填写标签后保存")
 
     def _clear_pending_annotation(self) -> None:
-        if self.pending_bbox_display is None:
+        if self.pending_bbox_display is None and self.pending_mask is None:
+            self._set_status("没有掩膜可以撤销")
             return
         # 16777219 == Qt.Key_Backspace to mirror the original behaviour
         self.segmentor.Key_Event(16777219)
-        self.pending_mask = None
-        self.pending_bbox_display = None
-        self.pending_bbox_original = None
-        self.label_edit.clear()
+        self._reset_pending_state(clear_label=False)
         self._render_with_overlays()
         self._set_status("已撤销当前掩膜")
 
@@ -373,9 +420,6 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
             upWindowsh("请先设置保存路径")
             return
 
-        x_disp, y_disp, w_disp, h_disp = self.pending_bbox_display
-        rect = (x_disp, y_disp, x_disp + w_disp, y_disp + h_disp)
-        self.display_rects.append(rect)
         self.annotation_list.addItem(label_text)
 
         x_orig, y_orig, w_orig, h_orig = self.pending_bbox_original
@@ -394,10 +438,7 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         self._persist_annotations(Path(self.current_image_path), Path(file_path).stem, size, self.current_labels)
 
         self.segmentor.Key_Event(83)  # Qt.Key_S: confirm the mask inside SAM
-        self.pending_mask = None
-        self.pending_bbox_display = None
-        self.pending_bbox_original = None
-        self.label_edit.clear()
+        self._reset_pending_state()
         self._render_with_overlays()
         self._set_status("已保存标注")
 
@@ -407,7 +448,6 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
             return
 
         del self.current_labels[row]
-        del self.display_rects[row]
         self.annotation_list.takeItem(row)
 
         if self.current_image_path and self.save_path:
@@ -473,11 +513,10 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
         preferred.append(fallback)
 
         labels: List[dict] = []
-        rects: List[Tuple[int, int, int, int]] = []
-
+        self.annotation_list.clear()
         for fmt in preferred:
             if fmt == "YOLO":
-                loaded, boxes, names = load_yolo_labels(
+                loaded, _boxes, names = load_yolo_labels(
                     base_path.with_suffix(".txt"),
                     self.original_size[0],
                     self.original_size[1],
@@ -485,16 +524,6 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
                 if not loaded:
                     continue
                 labels = loaded
-                rects = [
-                    (
-                        int(round(x1 * self.display_scale)),
-                        int(round(y1 * self.display_scale)),
-                        int(round(x2 * self.display_scale)),
-                        int(round(y2 * self.display_scale)),
-                    )
-                    for x1, y1, x2, y2 in boxes
-                ]
-                self.annotation_list.clear()
                 for name in names:
                     self.annotation_list.addItem(name)
                 break
@@ -503,31 +532,25 @@ class LabelerMainWindow(QtWidgets.QMainWindow):
                 if not xml_path.exists():
                     continue
                 labels = get_labels(str(xml_path))
-                self.annotation_list.clear()
                 for label in labels:
                     self.annotation_list.addItem(label["name"])
-                rects = []
                 for raw in labels:
                     xmin, ymin, xmax, ymax = raw["bndbox"]
                     width = xmax - xmin if xmax > xmin else xmax
                     height = ymax - ymin if ymax > ymin else ymax
-                    x1_disp = int(round(xmin * self.display_scale))
-                    y1_disp = int(round(ymin * self.display_scale))
-                    x2_disp = int(round((xmin + width) * self.display_scale))
-                    y2_disp = int(round((ymin + height) * self.display_scale))
-                    rects.append((x1_disp, y1_disp, x2_disp, y2_disp))
                     raw["bndbox"] = [xmin, ymin, width, height]
                 break
 
         self.current_labels = labels
-        self.display_rects = rects
-        self.pending_mask = None
-        self.pending_bbox_display = None
-        self.pending_bbox_original = None
-        self.label_edit.clear()
+        self._reset_pending_state()
         self.annotation_list.clearSelection()
         self.delete_button.setEnabled(False)
         self._render_with_overlays()
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        if self.original_image is not None:
+            self._update_display_image()
 
 
 def main() -> None:
