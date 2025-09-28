@@ -24,22 +24,26 @@ class VideoProcessingThread(QThread):
     finished = pyqtSignal()  # 完成信号
     frame_ready = pyqtSignal(object)  # 添加新信号用于传递处理后的帧
 
-    def __init__(self, avt, video_path, output_dir,clicked_x, clicked_y, method,text,save_path):
+    def __init__(self, avt, video_path, output_dir, clicks, save_path):
         super().__init__()
-        self.AVT = AnythingVideo_TW()
+        self.AVT = avt if avt is not None else AnythingVideo_TW()
         self.video_path = video_path
         self.output_dir = output_dir
-        self.clicked_x = clicked_x
-        self.clicked_y = clicked_y
-        self.method = method
-        self.text = text
+        self.clicks = clicks or []
         self.save_path = save_path
         self.xml_messages = []
         os.makedirs(self.output_dir, exist_ok=True)
 
     def run(self):
-        print(self.clicked_x, self.clicked_y, self.method)
         try:
+            self.AVT.video_segments = {}
+            self.AVT.target_points = {}
+            self.AVT.target_methods = {}
+            self.AVT.target_labels = {}
+            self.AVT.object_boxes = {}
+            self.AVT.out_obj_ids = None
+            self.AVT.out_mask_logits = None
+
             # 创建输出目录和mask子目录
             os.makedirs(self.output_dir, exist_ok=True)
             mask_dir = os.path.join(self.output_dir, "mask")
@@ -49,11 +53,32 @@ class VideoProcessingThread(QThread):
             self.AVT.extract_frames_from_video(self.video_path, self.output_dir,fps=2)
             self.AVT.set_video(self.output_dir)
             self.AVT.inference(self.output_dir)
-            self.AVT.Set_Clicked([self.clicked_x, self.clicked_y], self.method)
-            self.AVT.add_new_points_or_box()
-            
+            for obj_id, click in enumerate(self.clicks, start=1):
+                points = click.get("points")
+                if not points:
+                    coord = click.get("coords") or []
+                    if coord:
+                        points = [coord]
+                if not points:
+                    continue
+                methods = click.get("methods")
+                if not methods:
+                    method = click.get("method")
+                    if method is not None:
+                        methods = [method]
+                class_name = click.get("label") or click.get("text") or f"obj_{obj_id}"
+                self.AVT.add_new_points_or_box(
+                    obj_id=obj_id,
+                    points=points,
+                    labels=methods,
+                    class_name=class_name,
+                )
+
             # 获取处理后的帧并发送信号
-            processed_frame, xml_messages = self.AVT.Draw_Mask_at_frame(save_image_path=mask_dir,save_path=self.save_path,text=self.text)  # 使用新的mask_dir路径
+            processed_frame, xml_messages = self.AVT.Draw_Mask_at_frame(
+                save_image_path=mask_dir,
+                save_path=self.save_path,
+            )  # 使用新的mask_dir路径
             self.xml_messages = xml_messages
             self.frame_ready.emit(processed_frame)  # 发送处理后的帧
             
@@ -85,6 +110,10 @@ class MainFunc(QMainWindow):
         self.labels = []
         self.clicked_save = []
         self.paint_save = []
+        self.label_boxes_by_row = []
+        self.list_labels = []
+        self.video_clicks = []
+        self.is_video_mode = False
         self.flag = False
         self.save = True
         self.cap = None
@@ -95,8 +124,20 @@ class MainFunc(QMainWindow):
 
         self.timer_camera = QTimer()
 
-        self.annotation_format = self.ui.comboBox.currentText().strip().upper() or "XML"
-        self.ui.comboBox.currentTextChanged.connect(self.on_annotation_format_changed)
+        self.annotation_format_actions = {
+            "YOLO": self.ui.actionSaveTypeYOLO,
+            "XML": self.ui.actionSaveTypeXML,
+        }
+        self.save_type_action_group = QtWidgets.QActionGroup(self)
+        self.save_type_action_group.setExclusive(True)
+        for fmt, action in self.annotation_format_actions.items():
+            action.setCheckable(True)
+            action.setData(fmt)
+            self.save_type_action_group.addAction(action)
+            action.triggered.connect(lambda checked, fmt=fmt: self.on_save_type_triggered(fmt, checked))
+
+        self.annotation_format = None
+        self.on_annotation_format_changed("YOLO")
         self.ui.currentImageLabel.setText("Path")
 
         self.ui.actionOpen_Dir.triggered.connect(self.get_dir)
@@ -135,12 +176,106 @@ class MainFunc(QMainWindow):
             self.ui.actionPrev_Image.setEnabled(state)
             self.ui.actionNext_Image.setEnabled(state)
             self.ui.actionCreate_RectBox.setEnabled(state)
+
+    def clear_label_list(self):
+        self.ui.listWidget.clear()
+        self.label_boxes_by_row = []
+
+    @staticmethod
+    def _normalized_box(x1, y1, x2, y2):
+        return [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
+
+    def _remove_box_from_collections(self, box):
+        for collection in (self.clicked_save, self.paint_save):
+            for idx, existing in enumerate(collection):
+                if existing == box:
+                    collection.pop(idx)
+                    return
+
+    def _persist_labels_after_edit(self):
+        if not self.save_path or not self.image_name:
+            return
+
+        base_path = Path(self.save_path) / self.image_name
+        if not self.labels:
+            xml_path = base_path.with_suffix(".xml")
+            txt_path = base_path.with_suffix(".txt")
+            if xml_path.exists():
+                xml_path.unlink()
+            if txt_path.exists():
+                txt_path.unlink()
+            return
+
+        if self.img_width and self.img_height:
+            size = [self.img_width, self.img_height, 3]
+            self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
+
+    def remove_selected_labels(self):
+        selected_indexes = self.ui.listWidget.selectedIndexes()
+        if not selected_indexes or not self.labels:
+            return False
+
+        rows = sorted({index.row() for index in selected_indexes}, reverse=True)
+        removed = False
+        for row in rows:
+            if row >= len(self.labels):
+                continue
+
+            removed = True
+            self.ui.listWidget.takeItem(row)
+            del self.labels[row]
+            if self.list_labels and row < len(self.list_labels):
+                del self.list_labels[row]
+
+            if row < len(self.label_boxes_by_row):
+                box = self.label_boxes_by_row.pop(row)
+                self._remove_box_from_collections(box)
+
+            if self.is_video_mode and row < len(self.video_clicks):
+                self.video_clicks.pop(row)
+
+        if removed:
+            if self.img_path:
+                self.Show_Exists()
+            self._persist_labels_after_edit()
+            if self.is_video_mode and not self.video_clicks:
+                self.ui.pushButton_start_marking.setEnabled(False)
+
+        return removed
+
+    def clear_all_annotations(self):
+        self.clicked_event = False
+        self.paint_event = False
+        self.save = True
+        self.clear_label_list()
+        self.list_labels = []
+        self.clicked_save = []
+        self.paint_save = []
+        self.labels = []
+        self.video_clicks = []
+        if self.is_video_mode:
+            self.ui.pushButton_start_marking.setEnabled(False)
+        if self.img_path:
+            self.show_qt(self.img_path)
+        self.ui.label_4.mousePressEvent = self.mouse_press_event
+        self.ui.label_4.setCursor(Qt.ArrowCursor)
+
+        base_path = Path(self.save_path) / self.image_name if self.save_path and self.image_name else None
+        if base_path:
+            xml_path = base_path.with_suffix(".xml")
+            txt_path = base_path.with_suffix(".txt")
+            if xml_path.exists():
+                xml_path.unlink()
+            if txt_path.exists():
+                txt_path.unlink()
             
     def get_dir(self):
-        self.ui.listWidget.clear()
+        self.clear_label_list()
         if self.cap:
             self.timer_camera.stop()
-            self.ui.listWidget.clear()  # 清空listWidget
+            self.clear_label_list()  # 清空listWidget
+        self.is_video_mode = False
+        self.video_clicks = []
         self.directory = QtWidgets.QFileDialog.getExistingDirectory()
         if self.directory:
             self.image_files = list_images_in_directory(self.directory)
@@ -178,7 +313,7 @@ class MainFunc(QMainWindow):
         self.labels = []
         self.clicked_save = []
         self.paint_save = []
-        self.ui.listWidget.clear()
+        self.clear_label_list()
 
         if not self.save_path or not self.image_name:
             return
@@ -195,9 +330,11 @@ class MainFunc(QMainWindow):
                 if not labels:
                     continue
                 self.labels = labels
-                self.paint_save = boxes
-                for name in names:
+                normalized_boxes = [self._normalized_box(box[0], box[1], box[2], box[3]) for box in boxes]
+                self.paint_save = normalized_boxes.copy()
+                for box, name in zip(normalized_boxes, names):
                     self.ui.listWidget.addItem(name)
+                    self.label_boxes_by_row.append(box)
                 self.Show_Exists()
                 return
             else:
@@ -206,9 +343,11 @@ class MainFunc(QMainWindow):
                     continue
                 self.labels = get_labels(str(xml_path))
                 self.list_labels, list_box = list_label(str(xml_path))
-                self.paint_save = list_box
-                for label in self.list_labels:
+                normalized_boxes = [self._normalized_box(box[0], box[1], box[2], box[3]) for box in list_box]
+                self.paint_save = normalized_boxes.copy()
+                for label, box in zip(self.list_labels, normalized_boxes):
                     self.ui.listWidget.addItem(label)
+                    self.label_boxes_by_row.append(box)
                 self.Show_Exists()
                 return
 
@@ -240,7 +379,7 @@ class MainFunc(QMainWindow):
         self.labels = []
         self.paint_save = []
         self.clicked_save = []
-        self.ui.listWidget.clear()
+        self.clear_label_list()
         self.show_path_image()
 
     def set_save_path(self):
@@ -322,32 +461,12 @@ class MainFunc(QMainWindow):
                         self.ui.label_4.mousePressEvent = self.mouse_press_event
                         self.ui.label_4.setCursor(Qt.ArrowCursor)
 
-                
-
-            if (event.key() == 16777219):
-                    self.clicked_event = False
-                    self.paint_event = False
-                    self.save = True
-                    self.ui.listWidget.clear()
-                    self.list_labels = []
-                    self.clicked_save = []
-                    self.paint_save = []
-                    self.show_qt(self.img_path)
-                    self.ui.label_4.mousePressEvent = self.mouse_press_event
-                    self.ui.label_4.setCursor(Qt.ArrowCursor)
-                    base_path = Path(self.save_path) / self.image_name if self.save_path else None
-                    if base_path:
-                        xml_path = base_path.with_suffix(".xml")
-                        txt_path = base_path.with_suffix(".txt")
-                        if xml_path.exists():
-                            xml_path.unlink()
-                        if txt_path.exists():
-                            txt_path.unlink()
-                        self.labels = []
-                    else:
-                        super(QMainWindow, self).keyPressEvent(event)
-
-            
+            if event.key() == Qt.Key_Delete:
+                if self.remove_selected_labels():
+                    return
+                if not self.ui.listWidget.selectedIndexes():
+                    self.clear_all_annotations()
+                return
 
 
     
@@ -360,7 +479,9 @@ class MainFunc(QMainWindow):
             result, file_path, size = xml_message(self.save_path, self.image_name, self.img_width, self.img_height,
                                                   text, self.AT.x, self.AT.y, self.AT.w, self.AT.h)
             self.labels.append(result)
-            self.clicked_save.append([self.AT.x, self.AT.y, (self.AT.w + self.AT.x), (self.AT.h + self.AT.y)])
+            box = self._normalized_box(self.AT.x, self.AT.y, self.AT.w + self.AT.x, self.AT.h + self.AT.y)
+            self.clicked_save.append(box)
+            self.label_boxes_by_row.append(box)
             self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
 
         elif text and self.paint_event:
@@ -371,7 +492,9 @@ class MainFunc(QMainWindow):
                                                   text, self.x0, self.y0, abs(self.x1 - self.x0),
                                                   abs(self.y1 - self.y0))
             self.labels.append(result)
-            self.paint_save.append([self.x0, self.y0, self.x1, self.y1])
+            box = self._normalized_box(self.x0, self.y0, self.x1, self.y1)
+            self.paint_save.append(box)
+            self.label_boxes_by_row.append(box)
             self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
 
             self.ui.label_4.mousePressEvent = self.mouse_press_event
@@ -392,10 +515,40 @@ class MainFunc(QMainWindow):
             result, file_path, size = xml_message(self.save_path, self.image_name, self.img_width, self.img_height,
                                                     text, self.AT.x, self.AT.y, self.AT.w, self.AT.h)
             self.labels.append(result)
-            self.clicked_save.append([self.AT.x, self.AT.y, (self.AT.w + self.AT.x), (self.AT.h + self.AT.y)])
+            box = self._normalized_box(self.AT.x, self.AT.y, self.AT.w + self.AT.x, self.AT.h + self.AT.y)
+            self.clicked_save.append(box)
+            self.label_boxes_by_row.append(box)
             self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
             # 启用"开始检测打标"按钮
             self.ui.pushButton_start_marking.setEnabled(True)
+            points = [list(pt) for pt in getattr(self.AT, "coords", [])]
+            methods = list(getattr(self.AT, "methods", []))
+            if not points and self.clicked_x is not None and self.clicked_y is not None:
+                points = [[self.clicked_x, self.clicked_y]]
+            if not methods and self.method is not None:
+                methods = [self.method]
+            if points and methods:
+                click_payload = {
+                    "points": points,
+                    "methods": methods,
+                    "label": text,
+                }
+                if self.clicked_x is not None and self.clicked_y is not None:
+                    click_payload["coords"] = [self.clicked_x, self.clicked_y]
+                if self.method is not None:
+                    click_payload["method"] = self.method
+                self.video_clicks.append(click_payload)
+
+            self.AT.coords = []
+            self.AT.methods = []
+            self.AT.option = False
+            self.clicked_x = None
+            self.clicked_y = None
+            self.method = None
+        # 重新启用点击事件，允许继续添加下一个目标
+        if self.is_video_mode:
+            self.ui.label_4.mousePressEvent = self.mouse_press_event
+            self.ui.label_4.setCursor(Qt.ArrowCursor)
         self.clicked_event = False
         self.paint_event = False
 
@@ -489,7 +642,7 @@ class MainFunc(QMainWindow):
 # ##################################################################################################
     # 获取视频
     def get_video(self):
-        self.ui.listWidget.clear()  # 清空listWidget
+        self.clear_label_list()  # 清空listWidget
         self.image_files = None
         self.img_path = None
         self.num = 0
@@ -674,13 +827,16 @@ class MainFunc(QMainWindow):
             upWindowsh("请先选择视频和保存路径")
 
     def video_marking(self):
+        self.is_video_mode = True
+        self.video_clicks = []
         self.directory = None
         video_path, _ = QtWidgets.QFileDialog.getOpenFileName(self, "选择视频", "", "Video Files (*.mp4 *.mpg)")
         self.video_path = video_path
 
         output_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "选择图片保存文件夹")
         self.output_dir = output_dir
-        self.ui.listWidget.clear()
+        self.clear_label_list()
+        self.ui.pushButton_start_marking.setEnabled(False)
         if self.video_path and self.output_dir:
             self.Change_Enable(method="MakeTag",state=False)
             self.Change_Enable(method="ShowVideo",state=False)
@@ -718,40 +874,64 @@ class MainFunc(QMainWindow):
             # 鼠标点击触发
             self.ui.label_4.mousePressEvent = self.mouse_press_event
         else:
+            self.is_video_mode = False
+            self.video_clicks = []
             upWindowsh("请先选择视频和保存路径")
 
 
     def on_video_processing_complete(self):
         self.worker_thread.deleteLater()
         self.xml_messages = self.worker_thread.xml_messages
-        # print(self.xml_messages)
-        
-        # 遍历输出目录中的图片
+        frame_messages = {}
+        for message in self.xml_messages or []:
+            frame_name = message.get("frame_name")
+            if not frame_name:
+                continue
+            frame_messages[frame_name] = message
+
         for img_file in os.listdir(self.output_dir):
-            if img_file.endswith(('.jpg', '.jpeg', '.png')):  # 检查图片文件扩展名
-                # 获取不带扩展名的文件名
-                img_name = os.path.splitext(img_file)[0]
-                img_file  = os.path.join(self.output_dir,img_file)
+            if not img_file.lower().endswith((".jpg", ".jpeg", ".png")):
+                continue
 
-                # 在xml_messages中查找对应的消息
-                for msg in self.xml_messages:
-                    self.labels = []
-                    if len(msg) > 1:  # 确保msg有足够的元素
-                        xml_path = msg[1]  # 获取索引值为1的路径
-                        xml_filename = os.path.splitext(os.path.basename(xml_path))[0]
+            img_path = os.path.join(self.output_dir, img_file)
+            frame_stem = os.path.splitext(img_file)[0]
+            message = frame_messages.get(frame_stem)
+            if not message:
+                continue
 
-                        # 如果文件名匹配，则复制XML文件到save_path
-                        if xml_filename == img_name and self.save_path:
-                            result = msg[0]
-                            file_path = msg[1]
-                            size = msg[2]
-                            self.labels.append(result)
-                            self.save_annotation_files(img_file, img_name, size, self.labels)
+            labels = message.get("results") or []
+            if not labels:
+                continue
+
+            size = message.get("size")
+            if not size:
+                image = cv2.imread(img_path)
+                if image is not None:
+                    height, width = image.shape[:2]
+                    size = [width, height, 3]
+
+            self.save_annotation_files(img_path, frame_stem, size, labels)
+
+        if self.video_clicks:
+            self.ui.pushButton_start_marking.setEnabled(True)
         self.ui.listWidget.addItem("检测打标完成！")
         print("检测打标完成！")
 
+    def on_save_type_triggered(self, fmt, checked):
+        if checked:
+            self.on_annotation_format_changed(fmt)
+
     def on_annotation_format_changed(self, text):
-        self.annotation_format = text.strip().upper() or "XML"
+        fmt = (text or "").strip().upper() or "XML"
+        if fmt == self.annotation_format:
+            return
+
+        self.annotation_format = fmt
+        for action_fmt, action in self.annotation_format_actions.items():
+            block = action.blockSignals(True)
+            action.setChecked(action_fmt == fmt)
+            action.blockSignals(block)
+
         self.Exists_Labels_And_Boxs()
 
     def save_annotation_files(self, image_path, image_name, size, labels):
@@ -777,11 +957,24 @@ class MainFunc(QMainWindow):
         # 禁用开始检测打标按钮
         self.ui.pushButton_start_marking.setEnabled(False)
         if self.video_path and self.output_dir:
+            if not self.video_clicks:
+                upWindowsh("请先选择目标并添加标签")
+                self.ui.pushButton_start_marking.setEnabled(bool(self.video_clicks))
+                return
+
+            clicks_payload = [dict(click) for click in self.video_clicks]
+
             # 创建并启动工作线程
-            self.worker_thread = VideoProcessingThread(self.AVT, self.video_path, self.output_dir,self.clicked_x, self.clicked_y, self.method,self.text,self.save_path)
+            self.worker_thread = VideoProcessingThread(
+                self.AVT,
+                self.video_path,
+                self.output_dir,
+                clicks_payload,
+                self.save_path,
+            )
             self.worker_thread.finished.connect(self.on_video_processing_complete)
             self.worker_thread.start()
-            
+
 
         else:
             upWindowsh("请先选择视频和保存路径")

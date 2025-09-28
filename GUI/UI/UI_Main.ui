@@ -95,27 +95,6 @@
          <widget class="QWidget" name="layoutWidget">
           <layout class="QVBoxLayout" name="verticalLayout">
            <item>
-            <widget class="QLabel" name="label">
-             <property name="text">
-              <string>选择保存类型</string>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="comboBox">
-             <item>
-              <property name="text">
-               <string>XML</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>YOLO</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-           <item>
             <widget class="QLabel" name="currentImageLabel">
              <property name="text">
               <string>当前图片：-</string>
@@ -253,38 +232,29 @@
      <height>26</height>
     </rect>
    </property>
+   <widget class="QMenu" name="menuFile">
+    <property name="title">
+     <string>文件</string>
+    </property>
+    <addaction name="actionOpen_Video"/>
+    <addaction name="actionOpen_Dir"/>
+    <addaction name="actionChange_Save_Dir"/>
+    <addaction name="actionVideo_marking"/>
+    <addaction name="actionNext_Image"/>
+    <addaction name="actionPrev_Image"/>
+    <addaction name="actionCreate_RectBox"/>
+   </widget>
+   <widget class="QMenu" name="menuSaveType">
+    <property name="title">
+     <string>保存类型</string>
+    </property>
+    <addaction name="actionSaveTypeYOLO"/>
+    <addaction name="actionSaveTypeXML"/>
+   </widget>
+   <addaction name="menuFile"/>
+   <addaction name="menuSaveType"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
-  <widget class="QToolBar" name="toolBar">
-   <property name="enabled">
-    <bool>true</bool>
-   </property>
-   <property name="windowTitle">
-    <string>toolBar</string>
-   </property>
-   <property name="iconSize">
-    <size>
-     <width>45</width>
-     <height>45</height>
-    </size>
-   </property>
-   <property name="toolButtonStyle">
-    <enum>Qt::ToolButtonTextUnderIcon</enum>
-   </property>
-   <attribute name="toolBarArea">
-    <enum>LeftToolBarArea</enum>
-   </attribute>
-   <attribute name="toolBarBreak">
-    <bool>false</bool>
-   </attribute>
-   <addaction name="actionOpen_Video"/>
-   <addaction name="actionOpen_Dir"/>
-   <addaction name="actionChange_Save_Dir"/>
-   <addaction name="actionVideo_marking"/>
-   <addaction name="actionNext_Image"/>
-   <addaction name="actionPrev_Image"/>
-   <addaction name="actionCreate_RectBox"/>
-  </widget>
   <action name="actionOpen_Dir">
    <property name="icon">
     <iconset>
@@ -294,7 +264,7 @@
     <string>Open Dir</string>
    </property>
    <property name="shortcut">
-    <string>Ctrl+U</string>
+    <string>E</string>
    </property>
   </action>
   <action name="actionChange_Save_Dir">
@@ -306,7 +276,7 @@
     <string>Change Save Dir</string>
    </property>
    <property name="shortcut">
-    <string>Ctrl+R</string>
+    <string>S</string>
    </property>
   </action>
   <action name="actionNext_Image">
@@ -373,6 +343,25 @@
    </property>
    <property name="text">
     <string>Video marking</string>
+   </property>
+   <property name="shortcut">
+    <string>M</string>
+   </property>
+  </action>
+  <action name="actionSaveTypeYOLO">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>YOLO</string>
+   </property>
+  </action>
+  <action name="actionSaveTypeXML">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>XML</string>
    </property>
   </action>
  </widget>
