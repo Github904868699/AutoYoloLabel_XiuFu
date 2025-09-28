@@ -17,8 +17,8 @@ import numpy as np
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from sampro.LabelQuick_TW import Anything_TW
-from util.QtFunc import list_images_in_directory, upWindowsh
-from util.xmlfile import get_labels, load_yolo_labels, write_yolo_labels, xml, xml_message
+from util.QtFunc import get_labels, list_images_in_directory, upWindowsh
+from util.xmlfile import load_yolo_labels, write_yolo_labels, xml, xml_message
 
 
 MAX_DISPLAY_WIDTH = 1280
