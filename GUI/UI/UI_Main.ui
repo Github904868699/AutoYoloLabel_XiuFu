@@ -95,27 +95,6 @@
          <widget class="QWidget" name="layoutWidget">
           <layout class="QVBoxLayout" name="verticalLayout">
            <item>
-            <widget class="QLabel" name="label">
-             <property name="text">
-              <string>选择保存类型</string>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="comboBox">
-             <item>
-              <property name="text">
-               <string>XML</string>
-              </property>
-             </item>
-             <item>
-              <property name="text">
-               <string>YOLO</string>
-              </property>
-             </item>
-            </widget>
-           </item>
-           <item>
             <widget class="QLabel" name="currentImageLabel">
              <property name="text">
               <string>当前图片：-</string>
@@ -265,7 +244,15 @@
     <addaction name="actionPrev_Image"/>
     <addaction name="actionCreate_RectBox"/>
    </widget>
+   <widget class="QMenu" name="menuSaveType">
+    <property name="title">
+     <string>保存类型</string>
+    </property>
+    <addaction name="actionSaveTypeYOLO"/>
+    <addaction name="actionSaveTypeXML"/>
+   </widget>
    <addaction name="menuFile"/>
+   <addaction name="menuSaveType"/>
   </widget>
   <widget class="QStatusBar" name="statusbar"/>
   <action name="actionOpen_Dir">
@@ -353,14 +340,30 @@
    <property name="icon">
     <iconset>
      <normaloff>../icons/Video marking.png</normaloff>../icons/Video marking.png</iconset>
-    </property>
-    <property name="text">
-     <string>Video marking</string>
-    </property>
-    <property name="shortcut">
-     <string>M</string>
-    </property>
-   </action>
+   </property>
+   <property name="text">
+    <string>Video marking</string>
+   </property>
+   <property name="shortcut">
+    <string>M</string>
+   </property>
+  </action>
+  <action name="actionSaveTypeYOLO">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>YOLO</string>
+   </property>
+  </action>
+  <action name="actionSaveTypeXML">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>XML</string>
+   </property>
+  </action>
  </widget>
  <resources/>
  <connections/>

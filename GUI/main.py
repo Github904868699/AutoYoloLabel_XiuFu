@@ -95,8 +95,20 @@ class MainFunc(QMainWindow):
 
         self.timer_camera = QTimer()
 
-        self.annotation_format = self.ui.comboBox.currentText().strip().upper() or "XML"
-        self.ui.comboBox.currentTextChanged.connect(self.on_annotation_format_changed)
+        self.annotation_format_actions = {
+            "YOLO": self.ui.actionSaveTypeYOLO,
+            "XML": self.ui.actionSaveTypeXML,
+        }
+        self.save_type_action_group = QtWidgets.QActionGroup(self)
+        self.save_type_action_group.setExclusive(True)
+        for fmt, action in self.annotation_format_actions.items():
+            action.setCheckable(True)
+            action.setData(fmt)
+            self.save_type_action_group.addAction(action)
+            action.triggered.connect(lambda checked, fmt=fmt: self.on_save_type_triggered(fmt, checked))
+
+        self.annotation_format = None
+        self.on_annotation_format_changed("YOLO")
         self.ui.currentImageLabel.setText("Path")
 
         self.ui.actionOpen_Dir.triggered.connect(self.get_dir)
@@ -750,8 +762,21 @@ class MainFunc(QMainWindow):
         self.ui.listWidget.addItem("检测打标完成！")
         print("检测打标完成！")
 
+    def on_save_type_triggered(self, fmt, checked):
+        if checked:
+            self.on_annotation_format_changed(fmt)
+
     def on_annotation_format_changed(self, text):
-        self.annotation_format = text.strip().upper() or "XML"
+        fmt = (text or "").strip().upper() or "XML"
+        if fmt == self.annotation_format:
+            return
+
+        self.annotation_format = fmt
+        for action_fmt, action in self.annotation_format_actions.items():
+            block = action.blockSignals(True)
+            action.setChecked(action_fmt == fmt)
+            action.blockSignals(block)
+
         self.Exists_Labels_And_Boxs()
 
     def save_annotation_files(self, image_path, image_name, size, labels):
