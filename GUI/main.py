@@ -519,6 +519,10 @@ class MainFunc(QMainWindow):
                     "method": self.method,
                     "label": text,
                 })
+        # 重新启用点击事件，允许继续添加下一个目标
+        if self.is_video_mode:
+            self.ui.label_4.mousePressEvent = self.mouse_press_event
+            self.ui.label_4.setCursor(Qt.ArrowCursor)
         self.clicked_event = False
         self.paint_event = False
 
