@@ -85,6 +85,8 @@ class MainFunc(QMainWindow):
         self.labels = []
         self.clicked_save = []
         self.paint_save = []
+        self.label_boxes_by_row = []
+        self.list_labels = []
         self.flag = False
         self.save = True
         self.cap = None
@@ -147,12 +149,96 @@ class MainFunc(QMainWindow):
             self.ui.actionPrev_Image.setEnabled(state)
             self.ui.actionNext_Image.setEnabled(state)
             self.ui.actionCreate_RectBox.setEnabled(state)
+
+    def clear_label_list(self):
+        self.ui.listWidget.clear()
+        self.label_boxes_by_row = []
+
+    @staticmethod
+    def _normalized_box(x1, y1, x2, y2):
+        return [min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2)]
+
+    def _remove_box_from_collections(self, box):
+        for collection in (self.clicked_save, self.paint_save):
+            for idx, existing in enumerate(collection):
+                if existing == box:
+                    collection.pop(idx)
+                    return
+
+    def _persist_labels_after_edit(self):
+        if not self.save_path or not self.image_name:
+            return
+
+        base_path = Path(self.save_path) / self.image_name
+        if not self.labels:
+            xml_path = base_path.with_suffix(".xml")
+            txt_path = base_path.with_suffix(".txt")
+            if xml_path.exists():
+                xml_path.unlink()
+            if txt_path.exists():
+                txt_path.unlink()
+            return
+
+        if self.img_width and self.img_height:
+            size = [self.img_width, self.img_height, 3]
+            self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
+
+    def remove_selected_labels(self):
+        selected_indexes = self.ui.listWidget.selectedIndexes()
+        if not selected_indexes or not self.labels:
+            return False
+
+        rows = sorted({index.row() for index in selected_indexes}, reverse=True)
+        removed = False
+        for row in rows:
+            if row >= len(self.labels):
+                continue
+
+            removed = True
+            self.ui.listWidget.takeItem(row)
+            del self.labels[row]
+            if self.list_labels and row < len(self.list_labels):
+                del self.list_labels[row]
+
+            if row < len(self.label_boxes_by_row):
+                box = self.label_boxes_by_row.pop(row)
+                self._remove_box_from_collections(box)
+
+        if removed:
+            if self.img_path:
+                self.Show_Exists()
+            self._persist_labels_after_edit()
+
+        return removed
+
+    def clear_all_annotations(self):
+        self.clicked_event = False
+        self.paint_event = False
+        self.save = True
+        self.clear_label_list()
+        self.list_labels = []
+        self.clicked_save = []
+        self.paint_save = []
+        self.labels = []
+        if self.img_path:
+            self.show_qt(self.img_path)
+        self.ui.label_4.mousePressEvent = self.mouse_press_event
+        self.ui.label_4.setCursor(Qt.ArrowCursor)
+
+        base_path = Path(self.save_path) / self.image_name if self.save_path and self.image_name else None
+        if base_path:
+            xml_path = base_path.with_suffix(".xml")
+            txt_path = base_path.with_suffix(".txt")
+            if xml_path.exists():
+                xml_path.unlink()
+            if txt_path.exists():
+                txt_path.unlink()
             
     def get_dir(self):
-        self.ui.listWidget.clear()
+        self.clear_label_list()
         if self.cap:
             self.timer_camera.stop()
-            self.ui.listWidget.clear()  # 清空listWidget
+            self.clear_label_list()  # 清空listWidget
         self.directory = QtWidgets.QFileDialog.getExistingDirectory()
         if self.directory:
             self.image_files = list_images_in_directory(self.directory)
@@ -190,7 +276,7 @@ class MainFunc(QMainWindow):
         self.labels = []
         self.clicked_save = []
         self.paint_save = []
-        self.ui.listWidget.clear()
+        self.clear_label_list()
 
         if not self.save_path or not self.image_name:
             return
@@ -207,9 +293,11 @@ class MainFunc(QMainWindow):
                 if not labels:
                     continue
                 self.labels = labels
-                self.paint_save = boxes
-                for name in names:
+                normalized_boxes = [self._normalized_box(box[0], box[1], box[2], box[3]) for box in boxes]
+                self.paint_save = normalized_boxes.copy()
+                for box, name in zip(normalized_boxes, names):
                     self.ui.listWidget.addItem(name)
+                    self.label_boxes_by_row.append(box)
                 self.Show_Exists()
                 return
             else:
@@ -218,9 +306,11 @@ class MainFunc(QMainWindow):
                     continue
                 self.labels = get_labels(str(xml_path))
                 self.list_labels, list_box = list_label(str(xml_path))
-                self.paint_save = list_box
-                for label in self.list_labels:
+                normalized_boxes = [self._normalized_box(box[0], box[1], box[2], box[3]) for box in list_box]
+                self.paint_save = normalized_boxes.copy()
+                for label, box in zip(self.list_labels, normalized_boxes):
                     self.ui.listWidget.addItem(label)
+                    self.label_boxes_by_row.append(box)
                 self.Show_Exists()
                 return
 
@@ -252,7 +342,7 @@ class MainFunc(QMainWindow):
         self.labels = []
         self.paint_save = []
         self.clicked_save = []
-        self.ui.listWidget.clear()
+        self.clear_label_list()
         self.show_path_image()
 
     def set_save_path(self):
@@ -334,32 +424,12 @@ class MainFunc(QMainWindow):
                         self.ui.label_4.mousePressEvent = self.mouse_press_event
                         self.ui.label_4.setCursor(Qt.ArrowCursor)
 
-                
-
-            if (event.key() == 16777219):
-                    self.clicked_event = False
-                    self.paint_event = False
-                    self.save = True
-                    self.ui.listWidget.clear()
-                    self.list_labels = []
-                    self.clicked_save = []
-                    self.paint_save = []
-                    self.show_qt(self.img_path)
-                    self.ui.label_4.mousePressEvent = self.mouse_press_event
-                    self.ui.label_4.setCursor(Qt.ArrowCursor)
-                    base_path = Path(self.save_path) / self.image_name if self.save_path else None
-                    if base_path:
-                        xml_path = base_path.with_suffix(".xml")
-                        txt_path = base_path.with_suffix(".txt")
-                        if xml_path.exists():
-                            xml_path.unlink()
-                        if txt_path.exists():
-                            txt_path.unlink()
-                        self.labels = []
-                    else:
-                        super(QMainWindow, self).keyPressEvent(event)
-
-            
+            if event.key() == Qt.Key_Delete:
+                if self.remove_selected_labels():
+                    return
+                if not self.ui.listWidget.selectedIndexes():
+                    self.clear_all_annotations()
+                return
 
 
     
@@ -372,7 +442,9 @@ class MainFunc(QMainWindow):
             result, file_path, size = xml_message(self.save_path, self.image_name, self.img_width, self.img_height,
                                                   text, self.AT.x, self.AT.y, self.AT.w, self.AT.h)
             self.labels.append(result)
-            self.clicked_save.append([self.AT.x, self.AT.y, (self.AT.w + self.AT.x), (self.AT.h + self.AT.y)])
+            box = self._normalized_box(self.AT.x, self.AT.y, self.AT.w + self.AT.x, self.AT.h + self.AT.y)
+            self.clicked_save.append(box)
+            self.label_boxes_by_row.append(box)
             self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
 
         elif text and self.paint_event:
@@ -383,7 +455,9 @@ class MainFunc(QMainWindow):
                                                   text, self.x0, self.y0, abs(self.x1 - self.x0),
                                                   abs(self.y1 - self.y0))
             self.labels.append(result)
-            self.paint_save.append([self.x0, self.y0, self.x1, self.y1])
+            box = self._normalized_box(self.x0, self.y0, self.x1, self.y1)
+            self.paint_save.append(box)
+            self.label_boxes_by_row.append(box)
             self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
 
             self.ui.label_4.mousePressEvent = self.mouse_press_event
@@ -404,7 +478,9 @@ class MainFunc(QMainWindow):
             result, file_path, size = xml_message(self.save_path, self.image_name, self.img_width, self.img_height,
                                                     text, self.AT.x, self.AT.y, self.AT.w, self.AT.h)
             self.labels.append(result)
-            self.clicked_save.append([self.AT.x, self.AT.y, (self.AT.w + self.AT.x), (self.AT.h + self.AT.y)])
+            box = self._normalized_box(self.AT.x, self.AT.y, self.AT.w + self.AT.x, self.AT.h + self.AT.y)
+            self.clicked_save.append(box)
+            self.label_boxes_by_row.append(box)
             self.save_annotation_files(self.image_path, self.image_name, size, self.labels)
             # 启用"开始检测打标"按钮
             self.ui.pushButton_start_marking.setEnabled(True)
@@ -501,7 +577,7 @@ class MainFunc(QMainWindow):
 # ##################################################################################################
     # 获取视频
     def get_video(self):
-        self.ui.listWidget.clear()  # 清空listWidget
+        self.clear_label_list()  # 清空listWidget
         self.image_files = None
         self.img_path = None
         self.num = 0
@@ -692,7 +768,7 @@ class MainFunc(QMainWindow):
 
         output_dir = QtWidgets.QFileDialog.getExistingDirectory(self, "选择图片保存文件夹")
         self.output_dir = output_dir
-        self.ui.listWidget.clear()
+        self.clear_label_list()
         if self.video_path and self.output_dir:
             self.Change_Enable(method="MakeTag",state=False)
             self.Change_Enable(method="ShowVideo",state=False)
